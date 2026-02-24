@@ -1,5 +1,4 @@
 import { PortfolioService } from '@ghostfolio/api/app/portfolio/portfolio.service';
-import { PrismaService } from '@ghostfolio/api/services/prisma/prisma.service';
 
 import { Injectable } from '@nestjs/common';
 
@@ -68,8 +67,7 @@ function isPortfolioQuestion(message: string): boolean {
 @Injectable()
 export class AgentService {
   constructor(
-    private readonly portfolioService: PortfolioService,
-    private readonly prismaService: PrismaService
+    private readonly portfolioService: PortfolioService
   ) {}
 
   async chat(input: {
@@ -147,21 +145,21 @@ export class AgentService {
     const lower = message.toLowerCase();
     const categoryMap: Record<string, string> = {
       'fossil fuel': 'fossil_fuels',
-      oil: 'fossil_fuels',
-      gas: 'fossil_fuels',
-      coal: 'fossil_fuels',
-      energy: 'fossil_fuels',
-      weapon: 'weapons_defense',
-      defense: 'weapons_defense',
-      military: 'weapons_defense',
-      tobacco: 'tobacco',
-      smoking: 'tobacco',
-      cigarette: 'tobacco',
-      gambling: 'gambling',
-      casino: 'gambling',
-      betting: 'gambling',
-      labor: 'controversial_labor',
-      sweatshop: 'controversial_labor'
+      'oil': 'fossil_fuels',
+      'gas': 'fossil_fuels',
+      'coal': 'fossil_fuels',
+      'energy': 'fossil_fuels',
+      'weapon': 'weapons_defense',
+      'defense': 'weapons_defense',
+      'military': 'weapons_defense',
+      'tobacco': 'tobacco',
+      'smoking': 'tobacco',
+      'cigarette': 'tobacco',
+      'gambling': 'gambling',
+      'casino': 'gambling',
+      'betting': 'gambling',
+      'labor': 'controversial_labor',
+      'sweatshop': 'controversial_labor'
     };
     for (const [keyword, category] of Object.entries(categoryMap)) {
       if (lower.includes(keyword)) {
@@ -196,51 +194,13 @@ export class AgentService {
     }
 
     // Convert holdings to the format expected by complianceCheck
-    let holdingInputs = Object.entries(holdings).map(
+    const holdingInputs = Object.entries(holdings).map(
       ([symbol, data]: [string, any]) => ({
         symbol,
         name: data.name || symbol,
         valueInBaseCurrency: data.valueInBaseCurrency || 0
       })
     );
-
-    // Fallback: query orders directly when getDetails returns empty
-    // (common with MANUAL data source holdings)
-    if (holdingInputs.length === 0) {
-      try {
-        const orders = await this.prismaService.order.findMany({
-          where: { userId, type: 'BUY' },
-          include: { SymbolProfile: true }
-        });
-        const holdingMap = new Map<
-          string,
-          { symbol: string; name: string; value: number }
-        >();
-        for (const order of orders) {
-          const key = order.SymbolProfile?.id || order.id;
-          const existing = holdingMap.get(key);
-          const orderValue = Number(order.quantity) * Number(order.unitPrice);
-          const symbolName =
-            order.SymbolProfile?.name || order.SymbolProfile?.symbol || key;
-          if (existing) {
-            existing.value += orderValue;
-          } else {
-            holdingMap.set(key, {
-              symbol: order.SymbolProfile?.symbol || key,
-              name: symbolName,
-              value: orderValue
-            });
-          }
-        }
-        holdingInputs = Array.from(holdingMap.values()).map((h) => ({
-          symbol: h.symbol,
-          name: h.name,
-          valueInBaseCurrency: h.value
-        }));
-      } catch {
-        // Prisma fallback failed; continue with empty holdings
-      }
-    }
 
     if (holdingInputs.length === 0) {
       return {
@@ -341,9 +301,7 @@ export class AgentService {
     // Concentration section
     const c = result.concentration;
     parts.push('📊 **Portfolio Concentration**');
-    parts.push(
-      `• Top holding: ${c.topHoldingSymbol} (${c.topHoldingPercent}%)`
-    );
+    parts.push(`• Top holding: ${c.topHoldingSymbol} (${c.topHoldingPercent}%)`);
     parts.push(`• HHI (Herfindahl Index): ${c.herfindahlIndex.toFixed(4)}`);
     parts.push(`• Diversification: ${c.diversificationLevel}`);
 
@@ -357,9 +315,7 @@ export class AgentService {
     // Allocation section
     parts.push('');
     parts.push('📈 **Asset Allocation**');
-    for (const [assetClass, pct] of Object.entries(
-      result.allocation.byAssetClass
-    )) {
+    for (const [assetClass, pct] of Object.entries(result.allocation.byAssetClass)) {
       parts.push(`• ${assetClass}: ${pct}%`);
     }
 
@@ -369,9 +325,7 @@ export class AgentService {
     parts.push('💰 **Performance Summary**');
     parts.push(`• Current value: $${p.currentValue.toLocaleString()}`);
     parts.push(`• Total invested: $${p.totalInvestment.toLocaleString()}`);
-    parts.push(
-      `• Total return: $${p.totalReturn.toLocaleString()} (${p.totalReturnPercent}%)`
-    );
+    parts.push(`• Total return: $${p.totalReturn.toLocaleString()} (${p.totalReturnPercent}%)`);
 
     parts.push('');
     parts.push(`Total holdings: ${result.holdingsCount}`);
@@ -435,6 +389,8 @@ export class AgentService {
       'DATA',
       'QUOTE'
     ]);
-    return potentialSymbols.filter((s) => !commonWords.has(s) && s.length >= 2);
+    return potentialSymbols.filter(
+      (s) => !commonWords.has(s) && s.length >= 2
+    );
   }
 }
