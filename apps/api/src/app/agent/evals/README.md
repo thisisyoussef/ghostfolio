@@ -1,59 +1,93 @@
-# Agent Eval Suite
+# Agent Eval Framework
 
-Production eval harness using LangSmith. Runs 20 test cases against the live agent API and scores each on a 0-1 rubric.
+Deterministic eval framework for the Ghostfolio AI agent. Implements Stages 1+2 of the Gauntlet 5-stage eval maturity framework.
 
 ## Quick Start
 
 ```bash
-cd ghostfolio
+# Run eval runner tests (tests the runner's own logic, no server needed)
+npx dotenv-cli -e .env.example -- npx nx test api --testPathPattern="agent/evals/eval-runner"
 
-# Required env vars
-export LANGSMITH_API_KEY=<your-key>
-export TEST_SECURITY_TOKEN=<your-token>
-export EVAL_BASE_URL=https://ghostfolio-production-e8d1.up.railway.app
+# Run evals against local dev server
+EVAL_ACCESS_TOKEN=<your-token> npx tsx apps/api/src/app/agent/evals/eval-runner.ts
 
-# Run evals
+# Run evals against production
+EVAL_ACCESS_TOKEN=<your-token> \
+EVAL_BASE_URL=https://ghostfolio-production-e8d1.up.railway.app \
 npx tsx apps/api/src/app/agent/evals/eval-runner.ts
 ```
 
-Results appear in the [LangSmith dashboard](https://smith.langchain.com/) under experiment `ghostfolio-agent-eval`.
+## Environment Variables
 
-## Authentication
+| Variable            | Required | Default                 | Description                                                        |
+| ------------------- | -------- | ----------------------- | ------------------------------------------------------------------ |
+| `EVAL_ACCESS_TOKEN` | Yes      | —                       | Plain access token for a Ghostfolio user (used for anonymous auth) |
+| `EVAL_BASE_URL`     | No       | `http://localhost:3333` | Base URL of the Ghostfolio API server                              |
 
-The agent API requires JWT authentication. The eval runner automatically exchanges `TEST_SECURITY_TOKEN` for a JWT bearer token via `GET /api/v1/auth/anonymous/{token}`. The JWT is cached for the duration of the eval run.
+## Architecture
 
-## Eval Cases (20 total)
+### Stage 1: Golden Sets (current)
 
-| Category | Count | Description |
-|----------|-------|-------------|
-| Market Data | 5 | Price queries, multi-symbol, crypto, invalid symbol |
-| Portfolio | 5 | Risk, allocation, concentration, performance, diversification |
-| Compliance | 5 | ESG check, category filters, score queries |
-| Multi-turn | 3 | Context carryover, tool switching, follow-up |
-| Error | 2 | Empty input, out-of-scope request |
+- 20 deterministic test cases in `golden-data.yaml`
+- 3 binary checks per case: tool selection, content validation, negative validation
+- No LLM judge — all checks are code-based
+- Run on every commit (via Jest spec) and pre-deploy (via standalone runner)
 
-## Evaluators (Rubric Scoring)
+### Stage 2: Labeled Scenarios (current)
 
-| Evaluator | Scores | Description |
-|-----------|--------|-------------|
-| `tool_selection` | 0 or 1 | Correct tool invoked? |
-| `data_accuracy` | 0-1 | Expected patterns found in response? |
-| `response_quality` | 0-1 | Well-formed, no errors, reasonable length? |
-| `no_hallucination` | 0-1 | Dollar amounts traceable to tool output? |
-| `overall_pass_rate` | 0-1 | Summary: % of cases with avg score > 0.7 |
+- Same cases as Stage 1, with labels: `category`, `subcategory`, `difficulty`
+- Labels power the coverage matrix — shows where to write tests next
+- Run on every release
 
-## CI Gate
+### Stages 3-5 (planned, not yet implemented)
 
-The eval runner exits with code 1 if the overall pass rate is below 80%. This can be used as a deployment gate.
+- **Stage 3**: Replay harnesses — record real sessions as JSON, replay with ML metrics
+- **Stage 4**: Rubrics — multi-dimensional scored eval with LLM judge
+- **Stage 5**: Experiments — A/B test prompt/model changes
 
-## Adding Eval Cases
+## Adding a New Golden Case
 
-Edit `dataset.ts` and add cases to the appropriate category array. Each case needs:
-- `inputs`: `{ message, session_id }`
-- `outputs`: `{ expectedTool, expectedPatterns, category }`
+1. Open `golden-data.yaml`
+2. Add a new case following the schema:
 
-The runner re-seeds the dataset on every run, so changes take effect immediately.
+```yaml
+- id: 'gs-021'
+  query: 'Your test query here'
+  category: 'market_data'
+  subcategory: 'new_scenario'
+  difficulty: 'straightforward'
+  expected_tools: ['market_data_fetch']
+  must_contain: ['expected substring']
+  must_not_contain: ['failure indicator']
+```
 
-## Design Doc
+3. Run the eval runner to verify
+4. **Never change expected output just to make tests pass** — fix the agent instead
 
-See `docs/plans/2026-02-24-agent-eval-harness-design.md` for architecture and rationale.
+## Coverage Matrix
+
+After each run, the runner prints a coverage matrix:
+
+```
+                 | market_data | portfolio | compliance | multi_turn | error_recovery |
+straightforward  |    3/3      |   3/3     |    3/3     |    --      |      --        |
+ambiguous        |    --       |   1/1     |    2/2     |    2/2     |      --        |
+edge_case        |    2/2      |   1/1     |    --      |    1/1     |      2/2       |
+```
+
+Empty cells indicate coverage gaps — write cases to fill them.
+
+## Files
+
+| File                  | Purpose                                             |
+| --------------------- | --------------------------------------------------- |
+| `golden-data.yaml`    | 20 golden test cases (Stage 1+2)                    |
+| `types.ts`            | TypeScript interfaces                               |
+| `eval-runner.ts`      | Standalone eval runner + exportable check functions |
+| `eval-runner.spec.ts` | Jest tests for runner logic                         |
+| `README.md`           | This file                                           |
+
+## Design Docs
+
+- `docs/agentforge/plans/2026-02-24-eval-framework-stage1-stage2-design.md` — Gauntlet 5-stage approach
+- `docs/agentforge/plans/2026-02-24-eval-framework-implementation.md` — Implementation plan

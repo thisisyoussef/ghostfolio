@@ -8,13 +8,14 @@ If any instruction in other local instruction files conflicts with this file, th
 This is a **production product**, not a prototype, demo, or proof-of-concept. Every line of code ships to real users on Railway.
 
 **Absolute rules:**
+
 - **No mocks in production code.** Mocks belong exclusively in test files (`*.spec.ts`). Production code must use real services, real APIs, real data.
 - **No stub/placeholder implementations.** If a feature isn't ready, don't ship a fake version. Either implement it fully or don't ship it.
 - **No hardcoded sample data.** Production tools must fetch from real data sources (Yahoo Finance, Ghostfolio DB, etc.). Static datasets like `esg-violations.json` are reference data, not placeholders.
-- **No "MVP behavior" shortcuts.** The word "MVP" in user stories refers to the *scope* of the first release, not a license to cut quality. Every feature within that scope must be production-grade.
+- **No "MVP behavior" shortcuts.** The word "MVP" in user stories refers to the _scope_ of the first release, not a license to cut quality. Every feature within that scope must be production-grade.
 - **No TODO-driven development.** Don't leave `// TODO: implement real version` in code. If it's not implemented, it shouldn't be merged.
 
-When in doubt: *"Would I trust this code to handle a real user's financial data?"* If no, it's not ready.
+When in doubt: _"Would I trust this code to handle a real user's financial data?"_ If no, it's not ready.
 
 ## Engineering preferences
 
@@ -92,38 +93,49 @@ Every story's TDD Plan must address all applicable layers. Layers 1-4 run on eve
 - Snake_case ↔ camelCase mapping is correct in both request and response.
 - Error responses follow a consistent shape: `{ error: string, type: string, statusCode: number }`.
 
-### Layer 5: Production eval suite (planned — US-007)
+### Layer 5: Production eval suite — 5-stage framework
 
-**Status: Not yet implemented.** Will be built as part of US-007 (MVP Eval Suite).
+**Stages 1+2 (implemented):** Golden Sets + Labeled Scenarios
 
-**Tool:** LangSmith Eval SDK (standalone `tsx` script, NOT Jest).
-**Minimum 20 eval cases** scored on a 0-1 rubric.
+Deterministic binary checks against 20 golden test cases in `apps/api/src/app/agent/evals/golden-data.yaml`. No LLM judge — all checks are code-based.
 
-- 5 market data queries (valid symbol, invalid symbol, multi-symbol, crypto like BTC-USD, edge symbol like BRK.B).
-- 5 portfolio analysis queries (risk summary, concentration, empty portfolio, single holding, diversification).
-- 5 compliance queries (flagged ticker, clean portfolio, category filter, mixed results, empty portfolio).
-- 3 multi-turn conversations (context retention, topic switch, follow-up question).
-- 2 error recovery scenarios (bad input → helpful error → user retries → success).
+Each case has 3 binary checks:
 
-**Rubric evaluators** (each scores 0.0-1.0 per case):
+- `tool_selection`: Did the expected tool(s) appear in `tool_calls`?
+- `content_validation`: Do all `must_contain` substrings appear in the response? (case-insensitive)
+- `negative_validation`: Do none of the `must_not_contain` substrings appear? (case-insensitive)
 
-- `tool_selection`: correct tool invoked?
-- `data_accuracy`: expected patterns found in response?
-- `response_quality`: well-formed, no errors, reasonable length?
-- `no_hallucination`: dollar amounts traceable to tool output?
-- `overall_pass_rate` (summary): % of cases with avg score > 0.7. Gate: ≥80%.
-
-**Run command:**
+**Run commands:**
 
 ```bash
-cd ghostfolio
-LANGSMITH_API_KEY=$LANGSMITH_API_KEY \
+# Test the eval runner's own logic (fast, no server needed)
+npx dotenv-cli -e .env.example -- npx nx test api --testPathPattern="agent/evals/eval-runner"
+
+# Run evals against local dev server
+EVAL_ACCESS_TOKEN=<token> npx tsx apps/api/src/app/agent/evals/eval-runner.ts
+
+# Run evals against production
+EVAL_ACCESS_TOKEN=<token> \
 EVAL_BASE_URL=https://ghostfolio-production-e8d1.up.railway.app \
 npx tsx apps/api/src/app/agent/evals/eval-runner.ts
 ```
 
-Results appear in the LangSmith dashboard under experiment `ghostfolio-agent-eval`.
-Design doc: `docs/plans/2026-02-24-agent-eval-harness-design.md`.
+**Pass gate:** ≥80% of cases must pass. Exit code 0 on pass, 1 on fail.
+
+**4 rules:**
+
+1. Start small (20 cases, grow organically)
+2. Run on every commit (eval-runner.spec.ts) and pre-deploy (standalone runner)
+3. Add from production bugs (every bug becomes a golden case)
+4. NEVER change expected output to make tests pass — fix the agent
+
+**Stages 3-5 (planned, not yet implemented):**
+
+- Stage 3: Replay Harnesses — record real sessions as JSON fixtures, replay with ML metrics
+- Stage 4: Rubrics — multi-dimensional scored eval with LLM judge + calibration
+- Stage 5: Experiments — A/B test prompt/model changes with same test set
+
+Design doc: `docs/agentforge/plans/2026-02-24-eval-framework-stage1-stage2-design.md`
 
 ### Mandatory edge case categories
 
@@ -206,6 +218,7 @@ Do not assume user priorities on timeline or scale. After each section, pause fo
 ## Agent module architecture
 
 ### Authentication flow (mandatory for all agent endpoints)
+
 All agent endpoints use JWT authentication. **Never use PrismaService to look up users** — the user identity always comes from the JWT token.
 
 ```
@@ -215,6 +228,7 @@ JWT token → AuthGuard('jwt') → HasPermissionGuard → @Inject(REQUEST) reque
 ```
 
 Controller pattern:
+
 ```typescript
 @Controller('agent')
 export class AgentController {
@@ -236,7 +250,9 @@ export class AgentController {
 ```
 
 ### Routing logic
+
 `AgentService.chat()` uses keyword arrays to route messages:
+
 - `ESG_KEYWORDS` → `handleComplianceQuestion()` → `complianceCheck()` tool
 - `PORTFOLIO_KEYWORDS` → `handlePortfolioQuestion()` → `portfolioRiskAnalysis()` tool
 - Extracted ticker symbols → `marketDataFetch()` tool
@@ -244,13 +260,14 @@ export class AgentController {
 
 ### Tools (pure functions, no DI)
 
-| Tool | File | Signature | Data source |
-|------|------|-----------|-------------|
-| `marketDataFetch` | `tools/market-data.tool.ts` | `(input: { symbols: string[] })` | Yahoo Finance direct fetch |
-| `portfolioRiskAnalysis` | `tools/portfolio-analysis.tool.ts` | `(input, portfolioService, userId: string)` | Ghostfolio PortfolioService (NestJS DI) |
-| `complianceCheck` | `tools/compliance-checker.tool.ts` | `(input: { holdings, filterCategory? })` | Static ESG dataset (`data/esg-violations.json`) |
+| Tool                    | File                               | Signature                                   | Data source                                     |
+| ----------------------- | ---------------------------------- | ------------------------------------------- | ----------------------------------------------- |
+| `marketDataFetch`       | `tools/market-data.tool.ts`        | `(input: { symbols: string[] })`            | Yahoo Finance direct fetch                      |
+| `portfolioRiskAnalysis` | `tools/portfolio-analysis.tool.ts` | `(input, portfolioService, userId: string)` | Ghostfolio PortfolioService (NestJS DI)         |
+| `complianceCheck`       | `tools/compliance-checker.tool.ts` | `(input: { holdings, filterCategory? })`    | Static ESG dataset (`data/esg-violations.json`) |
 
 ### Key files
+
 ```
 apps/api/src/app/agent/
 ├── agent.module.ts              # NestJS module (imports PortfolioModule)
@@ -335,9 +352,9 @@ Quick summary (see canonical file for full testing requirements):
 - [ ] Story scope completed and status updated in `docs/agentforge/user-stories/`.
 - [ ] Layer 1 unit tests pass (≥10 per tool; see Testing Taxonomy above).
 - [ ] Layer 2 integration tests pass (≥5 per controller endpoint).
-- [ ] Layer 3 behavioral tests pass (≥8 per story) — *when implemented (US-006+)*.
+- [ ] Layer 3 behavioral tests pass (≥8 per story) — _when implemented (US-006+)_.
 - [ ] Layer 4 contract tests pass (≥3 per endpoint).
-- [ ] Layer 5 eval suite passes via LangSmith (≥80%) — *when implemented (US-007)*.
+- [ ] Layer 5 eval suite passes (≥80% golden cases) — _when implemented (US-007)_.
 - [ ] All 7 mandatory edge case categories covered.
 - [ ] Code committed and pushed to remote.
 - [ ] Production deployment completed successfully.
@@ -345,6 +362,6 @@ Quick summary (see canonical file for full testing requirements):
   - [ ] URL(s) opened in browser
   - [ ] expected page state/output observed
   - [ ] success/failure outcome recorded
-  - [ ] LangSmith eval experiment link recorded — *when Layer 5 implemented (US-007)*
+  - [ ] LangSmith eval experiment link recorded — _when Layer 5 implemented (US-007)_
 - [ ] Rollback path identified for the change.
 - [ ] Handoff includes: Story ID, commit SHA, deployed URL(s), verification result, LangSmith experiment URL.
