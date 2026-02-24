@@ -1,0 +1,48 @@
+<div class="agent-chat-container">
+  <div class="chat-header">
+    <h1>Market Data Agent</h1>
+    <p>Ask about stock prices. Try: "What is the price of AAPL?"</p>
+  </div>
+
+  <div class="chat-messages">
+    @for (message of messages; track $index) {
+      <div class="message" [class.user]="message.role === 'user'" [class.assistant]="message.role === 'assistant'">
+        <div class="message-role">{{ message.role === 'user' ? 'You' : 'Agent' }}</div>
+        <div class="message-content">{{ message.content }}</div>
+        @if (hasToolCalls(message)) {
+          <button class="tool-calls-toggle" (click)="toggleToolCalls(message)">
+            {{ isToolCallsVisible(message) ? 'Hide' : 'Show' }} tool calls ({{ message.toolCalls?.length }})
+          </button>
+          @if (isToolCallsVisible(message)) {
+            <div class="tool-calls">
+              @for (tc of message.toolCalls; track $index) {
+                <div class="tool-call">
+                  <div class="tool-name">{{ tc.name }}</div>
+                  <pre class="tool-result">{{ tc.result }}</pre>
+                </div>
+              }
+            </div>
+          }
+        }
+      </div>
+    }
+    @if (isLoading) {
+      <div class="message assistant">
+        <div class="message-role">Agent</div>
+        <div class="message-content loading">Thinking...</div>
+      </div>
+    }
+  </div>
+
+  <div class="chat-input">
+    <textarea
+      [(ngModel)]="inputMessage"
+      (keydown)="onKeyDown($event)"
+      placeholder="Ask about stock prices..."
+      rows="2"
+    ></textarea>
+    <button (click)="sendMessage()" [disabled]="isLoading || !inputMessage.trim()">
+      Send
+    </button>
+  </div>
+</div>

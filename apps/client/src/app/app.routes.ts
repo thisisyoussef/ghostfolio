@@ -137,6 +137,14 @@ export const routes: Routes = [
       import('./pages/zen/zen-page.routes').then((m) => m.routes)
   },
   {
+    loadComponent: () =>
+      import('./pages/agent/agent-page.component').then(
+        (c) => c.GfAgentPageComponent
+      ),
+    path: 'agent',
+    title: 'Market Data Agent'
+  },
+  {
     // wildcard, if requested url doesn't match any paths for routes defined
     // earlier
     path: '**',
