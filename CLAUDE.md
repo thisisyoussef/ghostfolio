@@ -169,8 +169,8 @@ npx dotenv-cli -e .env.example -- npx nx test api --testPathPattern="tool.spec" 
 npx dotenv-cli -e .env.example -- npx nx test api --testPathPattern="controller.spec"  # Integration
 npx dotenv-cli -e .env.example -- npx nx test api --testPathPattern="behavioral.spec"  # Behavioral
 
-# Layer 5: Production eval suite (LangSmith — standalone script, NOT Jest)
-LANGSMITH_API_KEY=$LANGSMITH_API_KEY \
+# Layer 5: Production eval suite (deterministic binary checks, NOT Jest)
+EVAL_ACCESS_TOKEN=<your-token> \
 EVAL_BASE_URL=https://ghostfolio-production-e8d1.up.railway.app \
 npx tsx apps/api/src/app/agent/evals/eval-runner.ts
 ```

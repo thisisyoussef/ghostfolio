@@ -202,11 +202,7 @@ async function sendChat(
 
   if (!res.ok) {
     const text = await res.text();
-    return {
-      response: `HTTP ${res.status}: ${text}`,
-      tool_calls: [],
-      session_id: sessionId
-    };
+    throw new Error(`Chat API error: HTTP ${res.status} ${text}`);
   }
 
   return (await res.json()) as AgentChatResponse;
@@ -230,35 +226,51 @@ async function evaluateSingleTurn(
 ): Promise<EvalResult> {
   const query = resolveQuery(goldenCase.query || '');
   const sessionId = `eval-${goldenCase.id}-${Date.now()}`;
-
   const start = Date.now();
-  const response = await sendChat(baseUrl, jwt, query, sessionId);
-  const duration_ms = Date.now() - start;
 
-  const actualTools = extractToolNames(response);
-  const tool_selection = checkToolSelection(
-    goldenCase.expected_tools,
-    actualTools
-  );
-  const content_validation = checkContentValidation(
-    goldenCase.must_contain,
-    response.response
-  );
-  const negative_validation = checkNegativeValidation(
-    goldenCase.must_not_contain,
-    response.response
-  );
+  try {
+    const response = await sendChat(baseUrl, jwt, query, sessionId);
+    const duration_ms = Date.now() - start;
 
-  const passed = tool_selection && content_validation && negative_validation;
+    const actualTools = extractToolNames(response);
+    const tool_selection = checkToolSelection(
+      goldenCase.expected_tools,
+      actualTools
+    );
+    const content_validation = checkContentValidation(
+      goldenCase.must_contain,
+      response.response
+    );
+    const negative_validation = checkNegativeValidation(
+      goldenCase.must_not_contain,
+      response.response
+    );
 
-  return {
-    case_id: goldenCase.id,
-    passed,
-    checks: { tool_selection, content_validation, negative_validation },
-    response_text: response.response,
-    actual_tools: actualTools,
-    duration_ms
-  };
+    const passed = tool_selection && content_validation && negative_validation;
+
+    return {
+      case_id: goldenCase.id,
+      passed,
+      checks: { tool_selection, content_validation, negative_validation },
+      response_text: response.response,
+      actual_tools: actualTools,
+      duration_ms
+    };
+  } catch (err) {
+    return {
+      case_id: goldenCase.id,
+      passed: false,
+      checks: {
+        tool_selection: false,
+        content_validation: false,
+        negative_validation: false
+      },
+      response_text: '',
+      actual_tools: [],
+      duration_ms: Date.now() - start,
+      error: err instanceof Error ? err.message : String(err)
+    };
+  }
 }
 
 async function evaluateMultiTurn(
@@ -268,55 +280,68 @@ async function evaluateMultiTurn(
 ): Promise<EvalResult> {
   const turns: EvalTurn[] = goldenCase.turns || [];
   const sessionId = `eval-${goldenCase.id}-${Date.now()}`;
-
-  let allPassed = true;
-  let lastResponseText = '';
-  let lastActualTools: string[] = [];
-  const overallChecks = {
-    tool_selection: true,
-    content_validation: true,
-    negative_validation: true
-  };
-
   const start = Date.now();
 
-  for (const turn of turns) {
-    const query = resolveQuery(turn.query);
-    const response = await sendChat(baseUrl, jwt, query, sessionId);
+  try {
+    let allPassed = true;
+    let lastResponseText = '';
+    let lastActualTools: string[] = [];
+    const overallChecks = {
+      tool_selection: true,
+      content_validation: true,
+      negative_validation: true
+    };
 
-    const actualTools = extractToolNames(response);
-    const toolOk = checkToolSelection(turn.expected_tools, actualTools);
-    const contentOk = checkContentValidation(
-      turn.must_contain,
-      response.response
-    );
-    const negativeOk = checkNegativeValidation(
-      turn.must_not_contain,
-      response.response
-    );
+    for (const turn of turns) {
+      const query = resolveQuery(turn.query);
+      const response = await sendChat(baseUrl, jwt, query, sessionId);
 
-    if (!toolOk) overallChecks.tool_selection = false;
-    if (!contentOk) overallChecks.content_validation = false;
-    if (!negativeOk) overallChecks.negative_validation = false;
+      const actualTools = extractToolNames(response);
+      const toolOk = checkToolSelection(turn.expected_tools, actualTools);
+      const contentOk = checkContentValidation(
+        turn.must_contain,
+        response.response
+      );
+      const negativeOk = checkNegativeValidation(
+        turn.must_not_contain,
+        response.response
+      );
 
-    if (!toolOk || !contentOk || !negativeOk) {
-      allPassed = false;
+      if (!toolOk) overallChecks.tool_selection = false;
+      if (!contentOk) overallChecks.content_validation = false;
+      if (!negativeOk) overallChecks.negative_validation = false;
+
+      if (!toolOk || !contentOk || !negativeOk) {
+        allPassed = false;
+      }
+
+      lastResponseText = response.response;
+      lastActualTools = actualTools;
     }
 
-    lastResponseText = response.response;
-    lastActualTools = actualTools;
+    return {
+      case_id: goldenCase.id,
+      passed: allPassed,
+      checks: overallChecks,
+      response_text: lastResponseText,
+      actual_tools: lastActualTools,
+      duration_ms: Date.now() - start
+    };
+  } catch (err) {
+    return {
+      case_id: goldenCase.id,
+      passed: false,
+      checks: {
+        tool_selection: false,
+        content_validation: false,
+        negative_validation: false
+      },
+      response_text: '',
+      actual_tools: [],
+      duration_ms: Date.now() - start,
+      error: err instanceof Error ? err.message : String(err)
+    };
   }
-
-  const duration_ms = Date.now() - start;
-
-  return {
-    case_id: goldenCase.id,
-    passed: allPassed,
-    checks: overallChecks,
-    response_text: lastResponseText,
-    actual_tools: lastActualTools,
-    duration_ms
-  };
 }
 
 function printResultsTable(results: EvalResult[], cases: GoldenCase[]): void {

@@ -216,6 +216,14 @@ describe('computeSummary', () => {
       edge_case: { total: 1, passed: 1 }
     });
   });
+
+  it('should return zero pass_rate for empty results', () => {
+    const summary = computeSummary([], []);
+    expect(summary.total).toBe(0);
+    expect(summary.passed).toBe(0);
+    expect(summary.failed).toBe(0);
+    expect(summary.pass_rate).toBe(0);
+  });
 });
 
 // ── buildCoverageMatrix ─────────────────────────────────────────────────────
