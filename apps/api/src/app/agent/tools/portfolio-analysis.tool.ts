@@ -31,6 +31,24 @@ export interface PortfolioAnalysisOutput {
 }
 
 /**
+ * Returns true if the string looks like a UUID (MANUAL data source assigns these as symbols).
+ */
+function isUuid(s: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
+}
+
+/**
+ * Returns a user-friendly display symbol. For MANUAL data source holdings,
+ * the symbol is a UUID — in that case, prefer the name.
+ */
+function displaySymbol(symbol: string, name: string): string {
+  if (isUuid(symbol) && name) {
+    return name;
+  }
+  return symbol;
+}
+
+/**
  * Compute the Herfindahl-Hirschman Index from allocation fractions.
  * HHI = Σ(allocation_i²) where allocation_i is a fraction (0–1).
  * Range: 0 (perfectly diversified) to 1 (single holding).
@@ -127,14 +145,15 @@ export async function portfolioRiskAnalysis(
   const topHoldings: HoldingInfo[] = holdingsList
     .slice(0, 5)
     .map((h) => ({
-      symbol: h.symbol,
+      symbol: displaySymbol(h.symbol, h.name),
       name: h.name,
       percentage: Math.round(h.allocation * 100 * 100) / 100
     }));
 
+  const topEntry = holdingsList[0];
   const concentration = {
-    topHoldingSymbol: holdingsList[0]?.symbol || '',
-    topHoldingPercent: Math.round((holdingsList[0]?.allocation || 0) * 100 * 100) / 100,
+    topHoldingSymbol: topEntry ? displaySymbol(topEntry.symbol, topEntry.name) : '',
+    topHoldingPercent: Math.round((topEntry?.allocation || 0) * 100 * 100) / 100,
     herfindahlIndex: Math.round(hhi * 10000) / 10000,
     topHoldings,
     diversificationLevel: classifyDiversification(hhi)
@@ -143,7 +162,11 @@ export async function portfolioRiskAnalysis(
   // --- Allocation by asset class ---
   const assetClassMap: Record<string, number> = {};
   for (const [, data] of holdingEntries) {
-    const assetClass = (data as any).assetClass || 'UNKNOWN';
+    let assetClass = (data as any).assetClass || 'UNKNOWN';
+    // Map internal labels to user-friendly names
+    if (assetClass === 'UNKNOWN') {
+      assetClass = 'Other';
+    }
     const pct = ((data as any).allocationInPercentage || 0) * 100;
     assetClassMap[assetClass] = Math.round(((assetClassMap[assetClass] || 0) + pct) * 100) / 100;
   }

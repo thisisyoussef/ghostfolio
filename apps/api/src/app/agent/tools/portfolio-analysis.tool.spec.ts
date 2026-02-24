@@ -245,7 +245,7 @@ describe('portfolioRiskAnalysis', () => {
 
       expect(result.allocation.byAssetClass).toEqual({
         EQUITY: 70,
-        UNKNOWN: 30
+        Other: 30
       });
     });
   });
@@ -322,6 +322,46 @@ describe('portfolioRiskAnalysis', () => {
 
       expect(result.error).toBeDefined();
       expect(result.error).toContain('Unable to access portfolio data');
+    });
+  });
+
+  describe('UUID symbol handling', () => {
+    it('should display name instead of UUID for MANUAL data source holdings', async () => {
+      const holdings = {
+        '6dafd93a-323e-432e-a3ea-f2685cde232c': {
+          allocationInPercentage: 0.6,
+          assetClass: undefined,
+          name: 'BTC',
+          symbol: '6dafd93a-323e-432e-a3ea-f2685cde232c',
+          valueInBaseCurrency: 60000,
+          netPerformancePercent: 0.5,
+          sectors: []
+        },
+        AAPL: {
+          allocationInPercentage: 0.4,
+          assetClass: 'EQUITY',
+          name: 'Apple Inc.',
+          symbol: 'AAPL',
+          valueInBaseCurrency: 40000,
+          netPerformancePercent: 0.1,
+          sectors: []
+        }
+      };
+
+      const mockPortfolioService = makeMockPortfolioService(holdings);
+
+      const result = await portfolioRiskAnalysis(
+        {},
+        mockPortfolioService as any,
+        TEST_USER_ID
+      );
+
+      // Top holding should show "BTC", not the UUID
+      expect(result.concentration.topHoldingSymbol).toBe('BTC');
+      // Top holdings list should also use name
+      expect(result.concentration.topHoldings[0].symbol).toBe('BTC');
+      // Regular ticker should stay as-is
+      expect(result.concentration.topHoldings[1].symbol).toBe('AAPL');
     });
   });
 

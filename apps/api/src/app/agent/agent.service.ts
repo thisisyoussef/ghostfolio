@@ -245,7 +245,7 @@ export class AgentService {
       for (const v of result.violations) {
         const cats = v.categories.join(', ').replace(/_/g, ' ');
         parts.push(
-          `• **${v.symbol}** (${v.name}) — ${cats} [${v.severity}]: ${v.reason}`
+          `• **${v.name}** — ${cats} [${v.severity}]: ${v.reason}`
         );
       }
     } else {
@@ -257,7 +257,7 @@ export class AgentService {
       parts.push('');
       parts.push('✅ **Clean Holdings:**');
       for (const h of result.cleanHoldings) {
-        parts.push(`• ${h.symbol} (${h.name})`);
+        parts.push(`• ${h.name}`);
       }
     }
 
@@ -300,15 +300,16 @@ export class AgentService {
 
     // Concentration section
     const c = result.concentration;
-    parts.push('📊 **Portfolio Concentration**');
-    parts.push(`• Top holding: ${c.topHoldingSymbol} (${c.topHoldingPercent}%)`);
-    parts.push(`• HHI (Herfindahl Index): ${c.herfindahlIndex.toFixed(4)}`);
-    parts.push(`• Diversification: ${c.diversificationLevel}`);
+    parts.push('📊 **Portfolio Risk Overview**');
+    parts.push(`• Top holding: **${c.topHoldingSymbol}** at ${c.topHoldingPercent}%`);
+    parts.push(`• Diversification: **${c.diversificationLevel}**`);
 
     if (c.topHoldings.length > 1) {
-      parts.push('• Top holdings:');
+      parts.push('');
+      parts.push('**Top Holdings:**');
       for (const h of c.topHoldings) {
-        parts.push(`  - ${h.symbol} (${h.name}): ${h.percentage}%`);
+        const label = h.symbol === h.name ? h.name : `${h.symbol} — ${h.name}`;
+        parts.push(`  • ${label}: ${h.percentage}%`);
       }
     }
 
@@ -323,12 +324,13 @@ export class AgentService {
     const p = result.performance;
     parts.push('');
     parts.push('💰 **Performance Summary**');
-    parts.push(`• Current value: $${p.currentValue.toLocaleString()}`);
-    parts.push(`• Total invested: $${p.totalInvestment.toLocaleString()}`);
-    parts.push(`• Total return: $${p.totalReturn.toLocaleString()} (${p.totalReturnPercent}%)`);
+    parts.push(`• Current value: $${p.currentValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
+    parts.push(`• Total invested: $${p.totalInvestment.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
+    const sign = p.totalReturn >= 0 ? '+' : '';
+    parts.push(`• Total return: ${sign}$${p.totalReturn.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (${sign}${p.totalReturnPercent}%)`);
 
     parts.push('');
-    parts.push(`Total holdings: ${result.holdingsCount}`);
+    parts.push(`_${result.holdingsCount} holdings analyzed_`);
 
     return {
       response: parts.join('\n'),

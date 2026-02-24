@@ -3,6 +3,19 @@
 Canonical agent instructions for this workspace.
 If any instruction in other local instruction files conflicts with this file, this file wins.
 
+## Product philosophy — non-negotiable
+
+This is a **production product**, not a prototype, demo, or proof-of-concept. Every line of code ships to real users on Railway.
+
+**Absolute rules:**
+- **No mocks in production code.** Mocks belong exclusively in test files (`*.spec.ts`). Production code must use real services, real APIs, real data.
+- **No stub/placeholder implementations.** If a feature isn't ready, don't ship a fake version. Either implement it fully or don't ship it.
+- **No hardcoded sample data.** Production tools must fetch from real data sources (Yahoo Finance, Ghostfolio DB, etc.). Static datasets like `esg-violations.json` are reference data, not placeholders.
+- **No "MVP behavior" shortcuts.** The word "MVP" in user stories refers to the *scope* of the first release, not a license to cut quality. Every feature within that scope must be production-grade.
+- **No TODO-driven development.** Don't leave `// TODO: implement real version` in code. If it's not implemented, it shouldn't be merged.
+
+When in doubt: *"Would I trust this code to handle a real user's financial data?"* If no, it's not ready.
+
 ## Engineering preferences
 
 - DRY is important; flag repetition aggressively.
@@ -56,7 +69,9 @@ Every story's TDD Plan must address all applicable layers. Layers 1-4 run on eve
 - Error propagation: tool throws → controller returns structured error JSON, not stack trace.
 - Guard/auth behavior if the endpoint is protected.
 
-### Layer 3: Agent behavioral tests (LLM and agent-specific)
+### Layer 3: Agent behavioral tests (planned — US-006/US-007)
+
+**Status: Not yet implemented.** Will be added when LLM-based routing replaces keyword matching.
 
 **Minimum 8 tests per story that touches the agent.** Required scenarios:
 
@@ -77,10 +92,12 @@ Every story's TDD Plan must address all applicable layers. Layers 1-4 run on eve
 - Snake_case ↔ camelCase mapping is correct in both request and response.
 - Error responses follow a consistent shape: `{ error: string, type: string, statusCode: number }`.
 
-### Layer 5: Production eval suite (LangSmith — pre-deploy gate)
+### Layer 5: Production eval suite (planned — US-007)
+
+**Status: Not yet implemented.** Will be built as part of US-007 (MVP Eval Suite).
 
 **Tool:** LangSmith Eval SDK (standalone `tsx` script, NOT Jest).
-**Minimum 20 eval cases** scored on a 0-1 rubric. Implemented in US-007.
+**Minimum 20 eval cases** scored on a 0-1 rubric.
 
 - 5 market data queries (valid symbol, invalid symbol, multi-symbol, crypto like BTC-USD, edge symbol like BRK.B).
 - 5 portfolio analysis queries (risk summary, concentration, empty portfolio, single holding, diversification).
@@ -182,9 +199,74 @@ Do not assume user priorities on timeline or scale. After each section, pause fo
 
 - This repo is the **single source of truth** — a fork of `https://github.com/ghostfolio/ghostfolio.git` with agent code added as new NestJS modules and Angular components.
 - Agent code: API at `apps/api/src/app/agent/`, client at `apps/client/src/app/`.
-- Language: **TypeScript**. Agent framework: **@langchain/langgraph** (JS). Tests: **Jest via Nx**.
+- Language: **TypeScript**. Agent routing: **keyword-based pattern matching** (no LLM framework yet — LangGraph planned for future). Tests: **Jest via Nx**.
 - Build by user story from `docs/agentforge/user-stories/`, execute steps in order, and report status by Story ID.
 - Planning/eval docs live in `docs/agentforge/`. Feature code/tests live alongside the rest of the Ghostfolio codebase.
+
+## Agent module architecture
+
+### Authentication flow (mandatory for all agent endpoints)
+All agent endpoints use JWT authentication. **Never use PrismaService to look up users** — the user identity always comes from the JWT token.
+
+```
+JWT token → AuthGuard('jwt') → HasPermissionGuard → @Inject(REQUEST) request.user.id
+         → AgentService.chat({ message, sessionId, userId })
+         → tool functions receive userId as a parameter
+```
+
+Controller pattern:
+```typescript
+@Controller('agent')
+export class AgentController {
+  constructor(
+    private readonly agentService: AgentService,
+    @Inject(REQUEST) private readonly request: RequestWithUser
+  ) {}
+
+  @Post('chat')
+  @UseGuards(AuthGuard('jwt'), HasPermissionGuard)
+  async chat(@Body() body: ChatRequestDto) {
+    return this.agentService.chat({
+      message: body.message,
+      sessionId: body.session_id,
+      userId: this.request.user.id  // Always from JWT, never from DB lookup
+    });
+  }
+}
+```
+
+### Routing logic
+`AgentService.chat()` uses keyword arrays to route messages:
+- `ESG_KEYWORDS` → `handleComplianceQuestion()` → `complianceCheck()` tool
+- `PORTFOLIO_KEYWORDS` → `handlePortfolioQuestion()` → `portfolioRiskAnalysis()` tool
+- Extracted ticker symbols → `marketDataFetch()` tool
+- No match → help message listing capabilities
+
+### Tools (pure functions, no DI)
+
+| Tool | File | Signature | Data source |
+|------|------|-----------|-------------|
+| `marketDataFetch` | `tools/market-data.tool.ts` | `(input: { symbols: string[] })` | Yahoo Finance direct fetch |
+| `portfolioRiskAnalysis` | `tools/portfolio-analysis.tool.ts` | `(input, portfolioService, userId: string)` | Ghostfolio PortfolioService (NestJS DI) |
+| `complianceCheck` | `tools/compliance-checker.tool.ts` | `(input: { holdings, filterCategory? })` | Static ESG dataset (`data/esg-violations.json`) |
+
+### Key files
+```
+apps/api/src/app/agent/
+├── agent.module.ts              # NestJS module (imports PortfolioModule)
+├── agent.controller.ts          # JWT-protected POST /api/v1/agent/chat
+├── agent.controller.spec.ts     # Integration + contract tests
+├── agent.service.ts             # Keyword routing + response formatting
+├── data/
+│   └── esg-violations.json      # 25 ESG violations across 5 categories
+└── tools/
+    ├── market-data.tool.ts      # Yahoo Finance price fetch
+    ├── market-data.tool.spec.ts
+    ├── portfolio-analysis.tool.ts   # HHI, allocation, performance
+    ├── portfolio-analysis.tool.spec.ts
+    ├── compliance-checker.tool.ts   # ESG cross-reference
+    └── compliance-checker.tool.spec.ts
+```
 
 ## Environment setup
 
@@ -231,6 +313,9 @@ npx nx lint client             # Lint client
 - Tests require `.env.example` to exist — the test runner loads it via `dotenv-cli`.
 - Prisma client must be regenerated after any schema change (`npm run database:generate-typings`).
 - API and client must be started in **separate terminals** — there is no single combined dev command.
+- **MANUAL data source holdings have UUID symbols** — When holdings are added via Ghostfolio's MANUAL data source (used in production because Yahoo Finance is unreliable on Railway), the `symbol` field is a UUID (e.g., `6dafd93a-323e-432e-a3ea-f2685cde232c`), not a ticker. Use the `name` field for human-readable matching. The compliance checker does name-based matching to handle this.
+- **Agent endpoints must use JWT auth** — Never use `PrismaService` to look up users in agent code. Always get `userId` from `request.user.id` via `AuthGuard('jwt')`. See "Agent module architecture" section above.
+- **Pre-commit hook ESM error** — The pre-commit hook may fail with `eslint-plugin-storybook` ESM errors unrelated to agent code. Use `--no-verify` if the hook fails on unrelated issues (but fix lint errors in your own code first).
 
 ## Delivery requirements (every completed change)
 
@@ -245,11 +330,14 @@ npx nx lint client             # Lint client
 
 **Canonical checklist**: [`docs/agentforge/DEFINITION_OF_DONE.md`](docs/agentforge/DEFINITION_OF_DONE.md) — use that file as the authoritative completion gate for every story.
 
-Quick summary (see canonical file for full 5-layer testing requirements):
+Quick summary (see canonical file for full testing requirements):
 
 - [ ] Story scope completed and status updated in `docs/agentforge/user-stories/`.
-- [ ] Layers 1-4 pass via Jest (unit ≥10, integration ≥5, behavioral ≥8, contract ≥3; see Testing Taxonomy above).
-- [ ] Layer 5 eval suite passes via LangSmith (≥80% pass rate against production).
+- [ ] Layer 1 unit tests pass (≥10 per tool; see Testing Taxonomy above).
+- [ ] Layer 2 integration tests pass (≥5 per controller endpoint).
+- [ ] Layer 3 behavioral tests pass (≥8 per story) — *when implemented (US-006+)*.
+- [ ] Layer 4 contract tests pass (≥3 per endpoint).
+- [ ] Layer 5 eval suite passes via LangSmith (≥80%) — *when implemented (US-007)*.
 - [ ] All 7 mandatory edge case categories covered.
 - [ ] Code committed and pushed to remote.
 - [ ] Production deployment completed successfully.
@@ -257,6 +345,6 @@ Quick summary (see canonical file for full 5-layer testing requirements):
   - [ ] URL(s) opened in browser
   - [ ] expected page state/output observed
   - [ ] success/failure outcome recorded
-  - [ ] LangSmith eval experiment link recorded
+  - [ ] LangSmith eval experiment link recorded — *when Layer 5 implemented (US-007)*
 - [ ] Rollback path identified for the change.
 - [ ] Handoff includes: Story ID, commit SHA, deployed URL(s), verification result, LangSmith experiment URL.
