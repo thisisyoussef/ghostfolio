@@ -1,31 +1,30 @@
-jest.mock('yahoo-finance2', () => {
-  const mockQuote = jest.fn();
-  function MockYahooFinance() {
-    return { quote: mockQuote };
-  }
-  return { default: MockYahooFinance, __mockQuote: mockQuote };
-});
-
 import { marketDataFetch, MarketDataOutput } from './market-data.tool';
 
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const { __mockQuote } = require('yahoo-finance2');
+const mockFetch = jest.fn();
+global.fetch = mockFetch;
+
+function makeChartResponse(meta: Record<string, unknown>) {
+  return {
+    ok: true,
+    json: async () => ({ chart: { result: [{ meta }] } })
+  };
+}
 
 describe('marketDataFetch', () => {
   beforeEach(() => {
-    __mockQuote.mockReset();
+    mockFetch.mockReset();
   });
 
   it('should return price > 0 for valid symbol (AAPL)', async () => {
-    __mockQuote.mockResolvedValue({
-      shortName: 'Apple Inc.',
-      regularMarketPrice: 195.23,
-      trailingPE: 30.5,
-      dividendYield: 0.005,
-      marketCap: 3000000000000,
-      fiftyTwoWeekHigh: 200.0,
-      fiftyTwoWeekLow: 140.0
-    });
+    mockFetch.mockResolvedValue(
+      makeChartResponse({
+        symbol: 'AAPL',
+        shortName: 'Apple Inc.',
+        regularMarketPrice: 195.23,
+        fiftyTwoWeekHigh: 200.0,
+        fiftyTwoWeekLow: 140.0
+      })
+    );
 
     const result = await marketDataFetch({ symbols: ['AAPL'] });
 
@@ -35,10 +34,17 @@ describe('marketDataFetch', () => {
     expect(data.price).toBeGreaterThan(0);
     expect(data.name).toBe('Apple Inc.');
     expect(data.error).toBeUndefined();
+    expect(mockFetch).toHaveBeenCalledWith(
+      expect.stringContaining('AAPL'),
+      expect.objectContaining({ headers: expect.any(Object) })
+    );
   });
 
   it('should return error info for invalid symbol (XYZNOTREAL)', async () => {
-    __mockQuote.mockResolvedValue(undefined);
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ chart: { result: null } })
+    });
 
     const result = await marketDataFetch({ symbols: ['XYZNOTREAL'] });
 
@@ -49,19 +55,25 @@ describe('marketDataFetch', () => {
   });
 
   it('should return data for multiple symbols (MSFT, GOOGL)', async () => {
-    __mockQuote
-      .mockResolvedValueOnce({
-        shortName: 'Microsoft Corporation',
-        regularMarketPrice: 420.5,
-        fiftyTwoWeekHigh: 450.0,
-        fiftyTwoWeekLow: 300.0
-      })
-      .mockResolvedValueOnce({
-        shortName: 'Alphabet Inc.',
-        regularMarketPrice: 175.3,
-        fiftyTwoWeekHigh: 200.0,
-        fiftyTwoWeekLow: 120.0
-      });
+    mockFetch
+      .mockResolvedValueOnce(
+        makeChartResponse({
+          symbol: 'MSFT',
+          shortName: 'Microsoft Corporation',
+          regularMarketPrice: 420.5,
+          fiftyTwoWeekHigh: 450.0,
+          fiftyTwoWeekLow: 300.0
+        })
+      )
+      .mockResolvedValueOnce(
+        makeChartResponse({
+          symbol: 'GOOGL',
+          shortName: 'Alphabet Inc.',
+          regularMarketPrice: 175.3,
+          fiftyTwoWeekHigh: 200.0,
+          fiftyTwoWeekLow: 120.0
+        })
+      );
 
     const result = await marketDataFetch({ symbols: ['MSFT', 'GOOGL'] });
 
