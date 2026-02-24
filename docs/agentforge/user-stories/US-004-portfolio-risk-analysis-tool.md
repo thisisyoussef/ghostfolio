@@ -1,10 +1,10 @@
 # US-004: Portfolio Risk Analysis Tool (Ghostfolio Service Integration)
 
 ## Status
-- State: `todo`
+- State: `done`
 - Owner: `youssef`
 - Depends on: US-002, US-003
-- Related PR/Commit:
+- Related PR/Commit: `375e6f167`
 - Target environment: `prod`
 
 ## Persona
@@ -239,11 +239,15 @@ npx nx build api
 4. Verify data matches seeded portfolio.
 
 ## Checkpoint Result
-_(Fill after deployment.)_
-- Commit SHA:
-- Ghostfolio URL:
-- User Validation: `passed | failed | blocked`
+- Commit SHA: `375e6f1678d7cefb74e0ed3aefb6992ca100a214`
+- Ghostfolio URL: `https://ghostfolio-production-e8d1.up.railway.app`
+- User Validation: `passed`
 - Notes:
+  - Tool routes correctly for portfolio keywords (concentration, allocation, risk, performance)
+  - Returns structured data with concentration, HHI, allocation, and performance sections
+  - "No holdings found" when portfolio is empty (correct behavior — graceful error)
+  - 17 tests pass (10 unit + 4 controller + 3 market-data regression)
+  - US-005 compliance checker also deployed as part of this commit (hooks added it)
 
 ## Observability & Monitoring
 - Logs to check:
