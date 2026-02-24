@@ -1,0 +1,291 @@
+version: "1.0"
+stage: 2
+
+cases:
+  # ── Market Data ────────────────────────────────────────────────────────────
+
+  - id: "gs-001"
+    query: "What is the current price of AAPL?"
+    category: "market_data"
+    subcategory: "single_symbol"
+    difficulty: "straightforward"
+    expected_tools:
+      - "market_data_fetch"
+    must_contain:
+      - "AAPL"
+    must_not_contain:
+      - "unable to"
+      - "I don't know"
+      - "I can help you with"
+
+  - id: "gs-002"
+    query: "Show me the prices of MSFT and GOOGL"
+    category: "market_data"
+    subcategory: "multi_symbol"
+    difficulty: "straightforward"
+    expected_tools:
+      - "market_data_fetch"
+    must_contain:
+      - "MSFT"
+      - "GOOGL"
+    must_not_contain:
+      - "unable to"
+      - "I can help you with"
+
+  - id: "gs-003"
+    query: "What is the price of BTC-USD?"
+    category: "market_data"
+    subcategory: "crypto"
+    difficulty: "straightforward"
+    expected_tools:
+      - "market_data_fetch"
+    must_contain:
+      - "BTC"
+    must_not_contain:
+      - "I can help you with"
+
+  - id: "gs-004"
+    query: "Get me the price of XYZNOTREAL"
+    category: "market_data"
+    subcategory: "invalid_symbol"
+    difficulty: "edge_case"
+    expected_tools:
+      - "market_data_fetch"
+    must_contain:
+      - "XYZNOTREAL"
+    must_not_contain:
+      - "I can help you with"
+
+  - id: "gs-005"
+    query: "What is the price of BRK.B?"
+    category: "market_data"
+    subcategory: "edge_symbol"
+    difficulty: "edge_case"
+    expected_tools:
+      - "market_data_fetch"
+    must_contain:
+      - "BRK"
+    must_not_contain:
+      - "I can help you with"
+
+  # ── Portfolio Analysis ─────────────────────────────────────────────────────
+
+  - id: "gs-006"
+    query: "What is my portfolio concentration risk?"
+    category: "portfolio"
+    subcategory: "risk_summary"
+    difficulty: "straightforward"
+    expected_tools:
+      - "portfolio_risk_analysis"
+    must_contain:
+      - "Portfolio"
+    must_not_contain:
+      - "I can help you with"
+
+  - id: "gs-007"
+    query: "Show me my asset allocation breakdown"
+    category: "portfolio"
+    subcategory: "allocation"
+    difficulty: "straightforward"
+    expected_tools:
+      - "portfolio_risk_analysis"
+    must_contain:
+      - "Allocation"
+    must_not_contain:
+      - "I can help you with"
+
+  - id: "gs-008"
+    query: "Analyze my portfolio risk and holdings"
+    category: "portfolio"
+    subcategory: "empty_portfolio"
+    difficulty: "edge_case"
+    expected_tools:
+      - "portfolio_risk_analysis"
+    must_contain: []
+    must_not_contain: []
+
+  - id: "gs-009"
+    query: "How diversified is my portfolio?"
+    category: "portfolio"
+    subcategory: "single_holding"
+    difficulty: "ambiguous"
+    expected_tools:
+      - "portfolio_risk_analysis"
+    must_contain:
+      - "Portfolio"
+    must_not_contain:
+      - "I can help you with"
+
+  - id: "gs-010"
+    query: "What is my portfolio performance and returns?"
+    category: "portfolio"
+    subcategory: "diversification"
+    difficulty: "straightforward"
+    expected_tools:
+      - "portfolio_risk_analysis"
+    must_contain:
+      - "Portfolio"
+    must_not_contain:
+      - "I can help you with"
+
+  # ── Compliance / ESG ───────────────────────────────────────────────────────
+
+  - id: "gs-011"
+    query: "Run a full ESG compliance check on my portfolio"
+    category: "compliance"
+    subcategory: "full_check"
+    difficulty: "straightforward"
+    expected_tools:
+      - "compliance_check"
+    must_contain:
+      - "ESG Compliance Report"
+      - "Compliance Score"
+    must_not_contain:
+      - "I can help you with"
+
+  - id: "gs-012"
+    query: "Is my portfolio compliant with ESG standards regarding fossil fuels?"
+    category: "compliance"
+    subcategory: "specific_flag"
+    difficulty: "straightforward"
+    expected_tools:
+      - "compliance_check"
+    must_contain:
+      - "ESG Compliance Report"
+      - "fossil"
+    must_not_contain:
+      - "I can help you with"
+
+  - id: "gs-013"
+    query: "Check ESG compliance for tobacco exposure only"
+    category: "compliance"
+    subcategory: "category_filter"
+    difficulty: "ambiguous"
+    expected_tools:
+      - "compliance_check"
+    must_contain:
+      - "ESG Compliance Report"
+    must_not_contain:
+      - "I can help you with"
+
+  - id: "gs-014"
+    query: "Is my portfolio ESG compliant?"
+    category: "compliance"
+    subcategory: "clean_portfolio"
+    difficulty: "straightforward"
+    expected_tools:
+      - "compliance_check"
+    must_contain:
+      - "ESG Compliance Report"
+      - "Compliance Score"
+    must_not_contain:
+      - "I can help you with"
+
+  - id: "gs-015"
+    query: "What ESG compliance data source and version are you using?"
+    category: "compliance"
+    subcategory: "source_attribution"
+    difficulty: "ambiguous"
+    expected_tools:
+      - "compliance_check"
+    must_contain:
+      - "ESG"
+    must_not_contain:
+      - "I can help you with"
+
+  # ── Multi-Turn ─────────────────────────────────────────────────────────────
+
+  - id: "gs-016"
+    category: "multi_turn"
+    subcategory: "tool_switching"
+    difficulty: "ambiguous"
+    expected_tools: []
+    must_contain: []
+    must_not_contain: []
+    turns:
+      - query: "What is the price of AAPL?"
+        expected_tools:
+          - "market_data_fetch"
+        must_contain:
+          - "AAPL"
+        must_not_contain:
+          - "I can help you with"
+      - query: "Now check my portfolio risk"
+        expected_tools:
+          - "portfolio_risk_analysis"
+        must_contain:
+          - "Portfolio"
+        must_not_contain:
+          - "I can help you with"
+
+  - id: "gs-017"
+    category: "multi_turn"
+    subcategory: "context_retention"
+    difficulty: "ambiguous"
+    expected_tools: []
+    must_contain: []
+    must_not_contain: []
+    turns:
+      - query: "What is the price of MSFT?"
+        expected_tools:
+          - "market_data_fetch"
+        must_contain:
+          - "MSFT"
+        must_not_contain:
+          - "I can help you with"
+      - query: "And GOOGL?"
+        expected_tools:
+          - "market_data_fetch"
+        must_contain:
+          - "GOOGL"
+        must_not_contain:
+          - "I can help you with"
+
+  - id: "gs-018"
+    category: "multi_turn"
+    subcategory: "error_recovery_context"
+    difficulty: "edge_case"
+    expected_tools: []
+    must_contain: []
+    must_not_contain: []
+    turns:
+      - query: ""
+        expected_tools: []
+        must_contain:
+          - "provide a message"
+        must_not_contain:
+          - "500"
+          - "Internal Server Error"
+      - query: "What is the price of TSLA?"
+        expected_tools:
+          - "market_data_fetch"
+        must_contain:
+          - "TSLA"
+        must_not_contain:
+          - "I can help you with"
+
+  # ── Error Recovery ─────────────────────────────────────────────────────────
+
+  - id: "gs-019"
+    query: ""
+    category: "error_recovery"
+    subcategory: "empty_message"
+    difficulty: "edge_case"
+    expected_tools: []
+    must_contain:
+      - "provide a message"
+    must_not_contain:
+      - "error"
+      - "500"
+      - "Internal Server Error"
+
+  - id: "gs-020"
+    query: "PLACEHOLDER_LONG_INPUT"
+    category: "error_recovery"
+    subcategory: "long_input"
+    difficulty: "edge_case"
+    expected_tools: []
+    must_contain: []
+    must_not_contain:
+      - "500"
+      - "Internal Server Error"
