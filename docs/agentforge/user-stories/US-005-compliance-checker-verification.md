@@ -64,8 +64,8 @@ Local docs/code reviewed:
 
 1. `apps/api/src/app/agent/tools/market-data.tool.ts` — plain function tool pattern (no DI, exported async function)
 2. `apps/api/src/app/agent/agent.service.ts` — keyword-based routing with `isEsgQuestion()` and `isPortfolioQuestion()`
-3. `apps/api/src/app/agent/tools/portfolio-analysis.tool.ts` — Ghostfolio data access via PortfolioService + PrismaService
-4. `apps/api/src/app/agent/agent.module.ts` — PortfolioModule imported for DI
+3. `apps/api/src/app/agent/tools/portfolio-analysis.tool.ts` — Ghostfolio data access via PortfolioService + authenticated userId (from JWT)
+4. `apps/api/src/app/agent/agent.module.ts` — PortfolioModule imported for DI (no PrismaModule — auth comes from JWT)
 
 ESG violations dataset design:
 
@@ -225,7 +225,7 @@ Implemented files:
 1. `apps/api/src/app/agent/data/esg-violations.json` — 25 ESG violations across 5 categories
 2. `apps/api/src/app/agent/tools/compliance-checker.tool.ts` — pure function tool with score calculation
 3. `apps/api/src/app/agent/tools/compliance-checker.tool.spec.ts` — 8 unit tests
-4. `apps/api/src/app/agent/agent.service.ts` — ESG keyword routing + `handleComplianceQuestion()`
+4. `apps/api/src/app/agent/agent.service.ts` — ESG keyword routing + `handleComplianceQuestion(message, sessionId, userId)`
 5. `apps/api/src/app/agent/agent.controller.spec.ts` — ESG routing test added
 
 Key interfaces:
@@ -235,6 +235,13 @@ interface HoldingInput { symbol: string; name?: string; valueInBaseCurrency: num
 interface ComplianceCheckInput { holdings: HoldingInput[]; filterCategory?: string; }
 interface ComplianceCheckOutput { complianceScore: number; violations: ViolationResult[]; cleanHoldings: [...]; totalChecked: number; datasetVersion: string; datasetLastUpdated: string; }
 ```
+
+### Authentication Architecture
+The compliance checker receives the authenticated user's ID from the JWT auth flow:
+- **Controller** (`agent.controller.ts`): `AuthGuard('jwt')` extracts `request.user.id` from the JWT token
+- **Service** (`agent.service.ts`): `handleComplianceQuestion(message, sessionId, userId)` — `userId` passed directly, no database user lookup
+- **Holdings access**: `portfolioService.getDetails({userId})` fetches only the authenticated user's holdings
+- **No PrismaService user lookup** — the user identity always comes from the JWT token, matching the pattern used by all other Ghostfolio controllers
 
 ## Acceptance Criteria
 
@@ -271,13 +278,18 @@ npx nx build api
 
 - Production URL(s):
   - Ghostfolio: `https://ghostfolio-production-e8d1.up.railway.app`
-  - Chat page: `https://ghostfolio-production-e8d1.up.railway.app/agent`
+  - Chat page: `https://ghostfolio-production-e8d1.up.railway.app/en/agent` (must be logged in)
+- Prerequisites:
+  - **Must be logged in** — the agent endpoint requires JWT authentication
+  - If not logged in, the API returns 401 Unauthorized (correct behavior)
 - Expected results:
   - "Is my portfolio ESG compliant?" → compliance score, XOM flagged as fossil_fuels
   - "Do I hold fossil fuel companies?" → filtered result showing XOM
   - Source attribution mentions ESG dataset version
+  - Data reflects the **logged-in user's** holdings
 - Failure signals:
-  - "Unable to check compliance" error
+  - "Unable to check compliance" error (service issue)
+  - 401 Unauthorized (not logged in — expected, not a bug)
   - XOM not flagged (dataset or matching issue)
   - Score doesn't add up
 - Rollback action:
@@ -285,19 +297,23 @@ npx nx build api
 
 ## User Checkpoint Test
 
-1. Ask "Is my portfolio ESG compliant?" → see score and XOM violation.
-2. Ask "Do I hold fossil fuel companies?" → see XOM only.
-3. Verify compliance score math matches portfolio allocation.
-4. Verify source attribution shows dataset version/date.
+1. **Log in** to Ghostfolio first (JWT auth required).
+2. Open `/en/agent` → ask "Is my portfolio ESG compliant?" → see score and XOM violation.
+3. Ask "Do I hold fossil fuel companies?" → see XOM only.
+4. Verify compliance score math matches **your** portfolio allocation.
+5. Verify source attribution shows dataset version/date.
 
 ## Checkpoint Result
 
-_(Fill after deployment.)_
-
-- Commit SHA:
-- Ghostfolio URL:
-- User Validation: `passed | failed | blocked`
+- Commit SHA: `375e6f167` (initial), `f54d58a4e` (auth fix)
+- Ghostfolio URL: `https://ghostfolio-production-e8d1.up.railway.app`
+- User Validation: `passed`
 - Notes:
+  - ESG compliance check routes correctly for ESG/ethical/fossil fuel keywords
+  - Returns compliance score, violations list with categories/severity, and clean holdings
+  - Source attribution includes dataset version and last updated date
+  - Name-based matching supports MANUAL data source holdings (UUID symbols)
+  - **Auth fix (f54d58a4e)**: `handleComplianceQuestion` now receives `userId` from JWT instead of using `prismaService.user.findFirst()`. Holdings fetched via `portfolioService.getDetails({userId})` for the authenticated user only.
 
 ## Observability & Monitoring
 

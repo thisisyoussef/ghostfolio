@@ -179,16 +179,27 @@ Write tests first. Red → Green → Refactor. Covers all 5 test layers (see CLA
 4. Deploy (single Ghostfolio service) and test via chat UI.
 
 ## Implementation Details
-_(Fill during execution.)_
 
 Implemented files:
-1.
-2.
+1. `apps/api/src/app/agent/tools/portfolio-analysis.tool.ts` — risk analysis tool (HHI, allocation, performance)
+2. `apps/api/src/app/agent/tools/portfolio-analysis.tool.spec.ts` — 10 unit tests
+3. `apps/api/src/app/agent/agent.controller.ts` — JWT-authenticated endpoint
+4. `apps/api/src/app/agent/agent.service.ts` — keyword routing, passes `userId` to tools
+5. `apps/api/src/app/agent/agent.module.ts` — imports `PortfolioModule`
 
 Key interfaces:
 ```typescript
-// Fill during implementation
+interface PortfolioAnalysisInput { dateRange?: string; metrics?: string[]; }
+interface PortfolioAnalysisOutput { concentration: {...}; allocation: {...}; performance: {...}; holdingsCount: number; error?: string; }
+// Tool signature: portfolioRiskAnalysis(input, portfolioService, userId: string)
 ```
+
+### Authentication Architecture
+The agent uses the same JWT auth pattern as all other Ghostfolio controllers:
+- **Controller**: `AuthGuard('jwt')` + `HasPermissionGuard` + `@Inject(REQUEST) request: RequestWithUser`
+- **Flow**: JWT token → `request.user.id` → `service.chat({userId})` → `portfolioRiskAnalysis(input, service, userId)`
+- **Angular client**: `AuthInterceptor` automatically adds `Authorization: Bearer <token>` header
+- **No PrismaService** in agent module — user identity always comes from JWT, never from database lookup
 
 ## Acceptance Criteria
 - [ ] AC1: Agent routes portfolio risk questions to `portfolio_risk_analysis`.
@@ -220,34 +231,39 @@ npx nx build api
 ## How To Verify In Prod (Required)
 - Production URL(s):
   - Ghostfolio: `https://ghostfolio-production-e8d1.up.railway.app`
-  - Chat page: `https://ghostfolio-production-e8d1.up.railway.app/agent`
+  - Chat page: `https://ghostfolio-production-e8d1.up.railway.app/en/agent` (must be logged in)
+- Prerequisites:
+  - **Must be logged in** — the agent endpoint requires JWT authentication
+  - If not logged in, the API returns 401 Unauthorized (correct behavior)
 - Expected results:
   - Ask "What's my portfolio concentration risk?" → response shows top holding %, HHI, allocation
-  - Data reflects seeded portfolio (AAPL, MSFT, GOOGL, BND, VWO, BTC, XOM)
+  - Data reflects the **logged-in user's** portfolio (not a random user)
   - `tool_calls` includes `portfolio_risk_analysis`
 - Failure signals:
-  - "Unable to access portfolio" error
-  - 500 from API
+  - "Unable to access portfolio" error (service issue)
+  - 401 Unauthorized (not logged in — expected, not a bug)
+  - 500 from API (unexpected)
   - Missing tool call in response
 - Rollback action:
   - Revert Ghostfolio deployment; market_data_fetch still works
 
 ## User Checkpoint Test
-1. Open Ghostfolio `/agent` → ask "What's my portfolio concentration risk?" → see metrics.
-2. Ask "Show my asset allocation" → see breakdown by asset class.
-3. Ask "How has my portfolio performed?" → see performance data.
-4. Verify data matches seeded portfolio.
+1. **Log in** to Ghostfolio first (JWT auth required).
+2. Open Ghostfolio `/en/agent` → ask "What's my portfolio concentration risk?" → see metrics.
+3. Ask "Show my asset allocation" → see breakdown by asset class.
+4. Ask "How has my portfolio performed?" → see performance data.
+5. Verify data matches **your** portfolio (not someone else's).
 
 ## Checkpoint Result
-- Commit SHA: `375e6f1678d7cefb74e0ed3aefb6992ca100a214`
+- Commit SHA: `375e6f167` (initial), `f54d58a4e` (auth fix)
 - Ghostfolio URL: `https://ghostfolio-production-e8d1.up.railway.app`
 - User Validation: `passed`
 - Notes:
   - Tool routes correctly for portfolio keywords (concentration, allocation, risk, performance)
   - Returns structured data with concentration, HHI, allocation, and performance sections
-  - "No holdings found" when portfolio is empty (correct behavior — graceful error)
-  - 17 tests pass (10 unit + 4 controller + 3 market-data regression)
+  - 26 agent tests pass (10 portfolio unit + 8 compliance unit + 4 controller + 4 market-data)
   - US-005 compliance checker also deployed as part of this commit (hooks added it)
+  - **Auth fix (f54d58a4e)**: Controller now uses `AuthGuard('jwt')` + `HasPermissionGuard` + `@Inject(REQUEST)` to get authenticated user ID. Removed `PrismaService` user lookup hack (`findFirst()`). The `userId` flows from JWT → controller → service → tools. This matches the pattern used by all other Ghostfolio controllers.
 
 ## Observability & Monitoring
 - Logs to check:
