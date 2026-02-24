@@ -54,14 +54,42 @@ const PORTFOLIO_KEYWORDS = [
   'invested'
 ];
 
-function isEsgQuestion(message: string): boolean {
+export function isEsgQuestion(message: string): boolean {
   const lower = message.toLowerCase();
   return ESG_KEYWORDS.some((keyword) => lower.includes(keyword));
 }
 
-function isPortfolioQuestion(message: string): boolean {
+export function isPortfolioQuestion(message: string): boolean {
   const lower = message.toLowerCase();
   return PORTFOLIO_KEYWORDS.some((keyword) => lower.includes(keyword));
+}
+
+export function detectCategoryFilter(message: string): string | undefined {
+  const lower = message.toLowerCase();
+  const categoryMap: Record<string, string> = {
+    'fossil fuel': 'fossil_fuels',
+    'oil': 'fossil_fuels',
+    'gas': 'fossil_fuels',
+    'coal': 'fossil_fuels',
+    'energy': 'fossil_fuels',
+    'weapon': 'weapons_defense',
+    'defense': 'weapons_defense',
+    'military': 'weapons_defense',
+    'tobacco': 'tobacco',
+    'smoking': 'tobacco',
+    'cigarette': 'tobacco',
+    'gambling': 'gambling',
+    'casino': 'gambling',
+    'betting': 'gambling',
+    'labor': 'controversial_labor',
+    'sweatshop': 'controversial_labor'
+  };
+  for (const [keyword, category] of Object.entries(categoryMap)) {
+    if (lower.includes(keyword)) {
+      return category;
+    }
+  }
+  return undefined;
 }
 
 @Injectable()
@@ -102,9 +130,9 @@ export class AgentService {
       return {
         response:
           'I can help you with:\n' +
-          '• ESG compliance check (ask about ESG, ethical investing, fossil fuels, etc.)\n' +
-          '• Portfolio risk analysis (ask about concentration, allocation, or performance)\n' +
-          '• Stock market data (include ticker symbols like AAPL, MSFT)\n\n' +
+          '- ESG compliance check (ask about ESG, ethical investing, fossil fuels, etc.)\n' +
+          '- Portfolio risk analysis (ask about concentration, allocation, or performance)\n' +
+          '- Stock market data (include ticker symbols like AAPL, MSFT)\n\n' +
           'What would you like to know?',
         toolCalls: [],
         sessionId
@@ -142,31 +170,7 @@ export class AgentService {
   }
 
   private detectCategoryFilter(message: string): string | undefined {
-    const lower = message.toLowerCase();
-    const categoryMap: Record<string, string> = {
-      'fossil fuel': 'fossil_fuels',
-      'oil': 'fossil_fuels',
-      'gas': 'fossil_fuels',
-      'coal': 'fossil_fuels',
-      'energy': 'fossil_fuels',
-      'weapon': 'weapons_defense',
-      'defense': 'weapons_defense',
-      'military': 'weapons_defense',
-      'tobacco': 'tobacco',
-      'smoking': 'tobacco',
-      'cigarette': 'tobacco',
-      'gambling': 'gambling',
-      'casino': 'gambling',
-      'betting': 'gambling',
-      'labor': 'controversial_labor',
-      'sweatshop': 'controversial_labor'
-    };
-    for (const [keyword, category] of Object.entries(categoryMap)) {
-      if (lower.includes(keyword)) {
-        return category;
-      }
-    }
-    return undefined;
+    return detectCategoryFilter(message);
   }
 
   private async handleComplianceQuestion(
@@ -229,23 +233,25 @@ export class AgentService {
     // Build human-readable response
     const parts: string[] = [];
     const filterLabel = filterCategory
-      ? ` (filtered: ${filterCategory.replace('_', ' ')})`
+      ? ` (${filterCategory.replace(/_/g, ' ')})`
       : '';
 
-    parts.push(`🌱 **ESG Compliance Report${filterLabel}**`);
-    parts.push(`• Compliance Score: **${result.complianceScore}%**`);
-    parts.push(`• Holdings checked: ${result.totalChecked}`);
+    parts.push(`### 🌱 ESG Compliance Report${filterLabel}`);
+    parts.push('');
+    parts.push(`- **Compliance Score:** ${result.complianceScore}%`);
+    parts.push(`- **Holdings checked:** ${result.totalChecked}`);
     parts.push(
-      `• Source: ESG Violations Dataset v${result.datasetVersion} (${result.datasetLastUpdated})`
+      `- **Source:** ESG Violations Dataset v${result.datasetVersion} (${result.datasetLastUpdated})`
     );
 
     if (result.violations.length > 0) {
       parts.push('');
-      parts.push('⚠️ **Violations Found:**');
+      parts.push('### ⚠️ Violations Found');
+      parts.push('');
       for (const v of result.violations) {
         const cats = v.categories.join(', ').replace(/_/g, ' ');
         parts.push(
-          `• **${v.name}** — ${cats} [${v.severity}]: ${v.reason}`
+          `- **${v.name}** — ${cats} [${v.severity}]: ${v.reason}`
         );
       }
     } else {
@@ -255,9 +261,10 @@ export class AgentService {
 
     if (result.cleanHoldings.length > 0 && result.violations.length > 0) {
       parts.push('');
-      parts.push('✅ **Clean Holdings:**');
+      parts.push('### ✅ Clean Holdings');
+      parts.push('');
       for (const h of result.cleanHoldings) {
-        parts.push(`• ${h.name}`);
+        parts.push(`- ${h.name}`);
       }
     }
 
@@ -297,40 +304,46 @@ export class AgentService {
 
     // Build human-readable response
     const parts: string[] = [];
+    const fmt = (n: number) =>
+      n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
     // Concentration section
     const c = result.concentration;
-    parts.push('📊 **Portfolio Risk Overview**');
-    parts.push(`• Top holding: **${c.topHoldingSymbol}** at ${c.topHoldingPercent}%`);
-    parts.push(`• Diversification: **${c.diversificationLevel}**`);
+    parts.push('### 📊 Portfolio Risk Overview');
+    parts.push('');
+    parts.push(`- **Top holding:** ${c.topHoldingSymbol} at ${c.topHoldingPercent}%`);
+    parts.push(`- **Diversification:** ${c.diversificationLevel}`);
 
     if (c.topHoldings.length > 1) {
       parts.push('');
-      parts.push('**Top Holdings:**');
+      parts.push('**Top Holdings**');
+      parts.push('');
       for (const h of c.topHoldings) {
         const label = h.symbol === h.name ? h.name : `${h.symbol} — ${h.name}`;
-        parts.push(`  • ${label}: ${h.percentage}%`);
+        parts.push(`- ${label}: **${h.percentage}%**`);
       }
     }
 
     // Allocation section
     parts.push('');
-    parts.push('📈 **Asset Allocation**');
+    parts.push('### 📈 Asset Allocation');
+    parts.push('');
     for (const [assetClass, pct] of Object.entries(result.allocation.byAssetClass)) {
-      parts.push(`• ${assetClass}: ${pct}%`);
+      parts.push(`- ${assetClass}: **${pct}%**`);
     }
 
     // Performance section
     const p = result.performance;
-    parts.push('');
-    parts.push('💰 **Performance Summary**');
-    parts.push(`• Current value: $${p.currentValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
-    parts.push(`• Total invested: $${p.totalInvestment.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
     const sign = p.totalReturn >= 0 ? '+' : '';
-    parts.push(`• Total return: ${sign}$${p.totalReturn.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (${sign}${p.totalReturnPercent}%)`);
+    parts.push('');
+    parts.push('### 💰 Performance Summary');
+    parts.push('');
+    parts.push(`- **Current value:** $${fmt(p.currentValue)}`);
+    parts.push(`- **Total invested:** $${fmt(p.totalInvestment)}`);
+    parts.push(`- **Total return:** ${sign}$${fmt(p.totalReturn)} (${sign}${p.totalReturnPercent}%)`);
 
     parts.push('');
-    parts.push(`_${result.holdingsCount} holdings analyzed_`);
+    parts.push(`*${result.holdingsCount} holdings analyzed*`);
 
     return {
       response: parts.join('\n'),

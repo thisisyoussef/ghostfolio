@@ -2,6 +2,7 @@ import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { Component } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { MarkdownModule } from 'ngx-markdown';
 
 interface ToolCall {
   name: string;
@@ -23,7 +24,7 @@ interface ChatResponse {
 
 @Component({
   host: { class: 'page' },
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, MarkdownModule],
   selector: 'gf-agent-page',
   styleUrls: ['./agent-page.scss'],
   templateUrl: './agent-page.html'

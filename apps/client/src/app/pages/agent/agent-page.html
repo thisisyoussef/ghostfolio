@@ -1,14 +1,20 @@
 <div class="agent-chat-container">
   <div class="chat-header">
-    <h1>Market Data Agent</h1>
-    <p>Ask about stock prices. Try: "What is the price of AAPL?"</p>
+    <h1>Portfolio Agent</h1>
+    <p>Ask about portfolio risk, ESG compliance, or stock prices.</p>
   </div>
 
   <div class="chat-messages">
     @for (message of messages; track $index) {
       <div class="message" [class.user]="message.role === 'user'" [class.assistant]="message.role === 'assistant'">
         <div class="message-role">{{ message.role === 'user' ? 'You' : 'Agent' }}</div>
-        <div class="message-content">{{ message.content }}</div>
+        @if (message.role === 'assistant') {
+          <div class="message-content">
+            <markdown [data]="message.content"></markdown>
+          </div>
+        } @else {
+          <div class="message-content">{{ message.content }}</div>
+        }
         @if (hasToolCalls(message)) {
           <button class="tool-calls-toggle" (click)="toggleToolCalls(message)">
             {{ isToolCallsVisible(message) ? 'Hide' : 'Show' }} tool calls ({{ message.toolCalls?.length }})
@@ -38,7 +44,7 @@
     <textarea
       [(ngModel)]="inputMessage"
       (keydown)="onKeyDown($event)"
-      placeholder="Ask about stock prices..."
+      placeholder="Ask about stock prices, portfolio risk, or ESG compliance..."
       rows="2"
     ></textarea>
     <button (click)="sendMessage()" [disabled]="isLoading || !inputMessage.trim()">
