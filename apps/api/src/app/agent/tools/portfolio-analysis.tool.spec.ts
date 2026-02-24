@@ -1,5 +1,7 @@
 import { portfolioRiskAnalysis } from './portfolio-analysis.tool';
 
+const TEST_USER_ID = 'test-user-id';
+
 // Mock PortfolioService
 function makeMockPortfolioService(holdings: Record<string, any> = {}) {
   return {
@@ -20,15 +22,6 @@ function makeMockPortfolioService(holdings: Record<string, any> = {}) {
   };
 }
 
-// Mock PrismaService
-function makeMockPrismaService(userId: string = 'test-user-id') {
-  return {
-    user: {
-      findFirst: jest.fn().mockResolvedValue({ id: userId })
-    }
-  };
-}
-
 describe('portfolioRiskAnalysis', () => {
   describe('concentration calculation', () => {
     it('should calculate 100% concentration and HHI=1.0 for single holding', async () => {
@@ -45,12 +38,11 @@ describe('portfolioRiskAnalysis', () => {
       };
 
       const mockPortfolioService = makeMockPortfolioService(holdings);
-      const mockPrismaService = makeMockPrismaService();
 
       const result = await portfolioRiskAnalysis(
         {},
         mockPortfolioService as any,
-        mockPrismaService as any
+        TEST_USER_ID
       );
 
       expect(result.concentration.topHoldingSymbol).toBe('AAPL');
@@ -90,12 +82,11 @@ describe('portfolioRiskAnalysis', () => {
       };
 
       const mockPortfolioService = makeMockPortfolioService(holdings);
-      const mockPrismaService = makeMockPrismaService();
 
       const result = await portfolioRiskAnalysis(
         {},
         mockPortfolioService as any,
-        mockPrismaService as any
+        TEST_USER_ID
       );
 
       // HHI = 3 * (1/3)^2 = 3 * 1/9 = 1/3 ≈ 0.333
@@ -161,12 +152,11 @@ describe('portfolioRiskAnalysis', () => {
       };
 
       const mockPortfolioService = makeMockPortfolioService(holdings);
-      const mockPrismaService = makeMockPrismaService();
 
       const result = await portfolioRiskAnalysis(
         {},
         mockPortfolioService as any,
-        mockPrismaService as any
+        TEST_USER_ID
       );
 
       expect(result.concentration.topHoldings).toHaveLength(5);
@@ -209,12 +199,11 @@ describe('portfolioRiskAnalysis', () => {
       };
 
       const mockPortfolioService = makeMockPortfolioService(holdings);
-      const mockPrismaService = makeMockPrismaService();
 
       const result = await portfolioRiskAnalysis(
         {},
         mockPortfolioService as any,
-        mockPrismaService as any
+        TEST_USER_ID
       );
 
       expect(result.allocation.byAssetClass).toEqual({
@@ -247,12 +236,11 @@ describe('portfolioRiskAnalysis', () => {
       };
 
       const mockPortfolioService = makeMockPortfolioService(holdings);
-      const mockPrismaService = makeMockPrismaService();
 
       const result = await portfolioRiskAnalysis(
         {},
         mockPortfolioService as any,
-        mockPrismaService as any
+        TEST_USER_ID
       );
 
       expect(result.allocation.byAssetClass).toEqual({
@@ -277,12 +265,11 @@ describe('portfolioRiskAnalysis', () => {
       };
 
       const mockPortfolioService = makeMockPortfolioService(holdings);
-      const mockPrismaService = makeMockPrismaService();
 
       const result = await portfolioRiskAnalysis(
         {},
         mockPortfolioService as any,
-        mockPrismaService as any
+        TEST_USER_ID
       );
 
       expect(result.performance).toBeDefined();
@@ -295,30 +282,24 @@ describe('portfolioRiskAnalysis', () => {
   describe('error handling', () => {
     it('should handle empty portfolio gracefully', async () => {
       const mockPortfolioService = makeMockPortfolioService({});
-      const mockPrismaService = makeMockPrismaService();
 
       const result = await portfolioRiskAnalysis(
         {},
         mockPortfolioService as any,
-        mockPrismaService as any
+        TEST_USER_ID
       );
 
       expect(result.error).toBeDefined();
       expect(result.error).toContain('No holdings');
     });
 
-    it('should handle missing user gracefully', async () => {
+    it('should handle missing userId gracefully', async () => {
       const mockPortfolioService = makeMockPortfolioService({});
-      const mockPrismaService = {
-        user: {
-          findFirst: jest.fn().mockResolvedValue(null)
-        }
-      };
 
       const result = await portfolioRiskAnalysis(
         {},
         mockPortfolioService as any,
-        mockPrismaService as any
+        ''
       );
 
       expect(result.error).toBeDefined();
@@ -332,12 +313,11 @@ describe('portfolioRiskAnalysis', () => {
           .mockRejectedValue(new Error('Database connection failed')),
         getPerformance: jest.fn()
       };
-      const mockPrismaService = makeMockPrismaService();
 
       const result = await portfolioRiskAnalysis(
         {},
         mockPortfolioService as any,
-        mockPrismaService as any
+        TEST_USER_ID
       );
 
       expect(result.error).toBeDefined();
@@ -346,7 +326,7 @@ describe('portfolioRiskAnalysis', () => {
   });
 
   describe('service calls', () => {
-    it('should call portfolioService.getDetails with correct parameters', async () => {
+    it('should call portfolioService.getDetails with correct userId', async () => {
       const holdings = {
         AAPL: {
           allocationInPercentage: 1.0,
@@ -360,12 +340,11 @@ describe('portfolioRiskAnalysis', () => {
       };
 
       const mockPortfolioService = makeMockPortfolioService(holdings);
-      const mockPrismaService = makeMockPrismaService('test-user-123');
 
       await portfolioRiskAnalysis(
         {},
         mockPortfolioService as any,
-        mockPrismaService as any
+        'test-user-123'
       );
 
       expect(mockPortfolioService.getDetails).toHaveBeenCalledWith(

@@ -1,5 +1,4 @@
 import { PortfolioModule } from '@ghostfolio/api/app/portfolio/portfolio.module';
-import { PrismaModule } from '@ghostfolio/api/services/prisma/prisma.module';
 
 import { Module } from '@nestjs/common';
 
@@ -8,7 +7,7 @@ import { AgentService } from './agent.service';
 
 @Module({
   controllers: [AgentController],
-  imports: [PortfolioModule, PrismaModule],
+  imports: [PortfolioModule],
   providers: [AgentService]
 })
 export class AgentModule {}

@@ -6,9 +6,12 @@ jest.mock('./agent.service', () => ({
 }));
 
 import { Test, TestingModule } from '@nestjs/testing';
+import { REQUEST } from '@nestjs/core';
 
 import { AgentController } from './agent.controller';
 import { AgentService } from './agent.service';
+
+const MOCK_USER_ID = 'test-user-id';
 
 describe('AgentController', () => {
   let controller: AgentController;
@@ -22,6 +25,12 @@ describe('AgentController', () => {
           provide: AgentService,
           useValue: {
             chat: jest.fn()
+          }
+        },
+        {
+          provide: REQUEST,
+          useValue: {
+            user: { id: MOCK_USER_ID }
           }
         }
       ]
@@ -56,7 +65,8 @@ describe('AgentController', () => {
     expect(result.tool_calls.length).toBeGreaterThan(0);
     expect(service.chat).toHaveBeenCalledWith({
       message: 'What is the price of AAPL?',
-      sessionId: 'test-1'
+      sessionId: 'test-1',
+      userId: MOCK_USER_ID
     });
   });
 
@@ -83,7 +93,8 @@ describe('AgentController', () => {
     expect(result.tool_calls[0].name).toBe('portfolio_risk_analysis');
     expect(service.chat).toHaveBeenCalledWith({
       message: "What's my portfolio concentration risk?",
-      sessionId: 'test-portfolio'
+      sessionId: 'test-portfolio',
+      userId: MOCK_USER_ID
     });
   });
 
@@ -110,7 +121,8 @@ describe('AgentController', () => {
     expect(result.tool_calls[0].name).toBe('compliance_check');
     expect(service.chat).toHaveBeenCalledWith({
       message: 'Is my portfolio ESG compliant?',
-      sessionId: 'test-esg'
+      sessionId: 'test-esg',
+      userId: MOCK_USER_ID
     });
   });
 

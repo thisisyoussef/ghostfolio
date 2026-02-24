@@ -52,12 +52,12 @@ function classifyDiversification(hhi: number): string {
  *
  * @param input - Optional date range and metrics filter
  * @param portfolioService - Ghostfolio PortfolioService instance
- * @param prismaService - PrismaService to look up the user
+ * @param userId - Authenticated user's ID (from JWT)
  */
 export async function portfolioRiskAnalysis(
   input: PortfolioAnalysisInput,
   portfolioService: any,
-  prismaService: any
+  userId: string
 ): Promise<PortfolioAnalysisOutput> {
   const emptyResult: PortfolioAnalysisOutput = {
     concentration: {
@@ -77,16 +77,8 @@ export async function portfolioRiskAnalysis(
     holdingsCount: 0
   };
 
-  // Find the first user (MVP: no auth on agent endpoint)
-  let userId: string;
-  try {
-    const user = await prismaService.user.findFirst();
-    if (!user) {
-      return { ...emptyResult, error: 'No user found — unable to access portfolio data.' };
-    }
-    userId = user.id;
-  } catch {
-    return { ...emptyResult, error: 'Unable to access portfolio data. Please try again later.' };
+  if (!userId) {
+    return { ...emptyResult, error: 'No authenticated user — unable to access portfolio data.' };
   }
 
   // Fetch portfolio details and performance

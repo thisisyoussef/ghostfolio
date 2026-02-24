@@ -1,5 +1,4 @@
 import { PortfolioService } from '@ghostfolio/api/app/portfolio/portfolio.service';
-import { PrismaService } from '@ghostfolio/api/services/prisma/prisma.service';
 
 import { Injectable } from '@nestjs/common';
 
@@ -68,15 +67,15 @@ function isPortfolioQuestion(message: string): boolean {
 @Injectable()
 export class AgentService {
   constructor(
-    private readonly portfolioService: PortfolioService,
-    private readonly prismaService: PrismaService
+    private readonly portfolioService: PortfolioService
   ) {}
 
   async chat(input: {
     message: string;
     sessionId: string;
+    userId: string;
   }): Promise<ChatResponse> {
-    const { message, sessionId } = input;
+    const { message, sessionId, userId } = input;
 
     if (!message.trim()) {
       return {
@@ -88,12 +87,12 @@ export class AgentService {
 
     // Route to compliance check if the question is about ESG
     if (isEsgQuestion(message)) {
-      return this.handleComplianceQuestion(message, sessionId);
+      return this.handleComplianceQuestion(message, sessionId, userId);
     }
 
     // Route to portfolio analysis if the question is about portfolio risk
     if (isPortfolioQuestion(message)) {
-      return this.handlePortfolioQuestion(message, sessionId);
+      return this.handlePortfolioQuestion(message, sessionId, userId);
     }
 
     // Extract ticker symbols from the message (basic pattern matching)
@@ -172,29 +171,9 @@ export class AgentService {
 
   private async handleComplianceQuestion(
     message: string,
-    sessionId: string
+    sessionId: string,
+    userId: string
   ): Promise<ChatResponse> {
-    // Get holdings from portfolio service (same pattern as portfolio analysis)
-    let userId: string;
-    try {
-      const user = await this.prismaService.user.findFirst();
-      if (!user) {
-        return {
-          response: 'Unable to check portfolio compliance — no user found.',
-          toolCalls: [],
-          sessionId
-        };
-      }
-      userId = user.id;
-    } catch {
-      return {
-        response:
-          'Unable to check portfolio compliance — portfolio service unavailable.',
-        toolCalls: [],
-        sessionId
-      };
-    }
-
     let holdings: Record<string, any>;
     try {
       const details = await this.portfolioService.getDetails({
@@ -291,12 +270,13 @@ export class AgentService {
 
   private async handlePortfolioQuestion(
     message: string,
-    sessionId: string
+    sessionId: string,
+    userId: string
   ): Promise<ChatResponse> {
     const result = await portfolioRiskAnalysis(
       {},
       this.portfolioService,
-      this.prismaService
+      userId
     );
 
     const toolCalls: ToolCallInfo[] = [
