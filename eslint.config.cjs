@@ -1,7 +1,15 @@
 const { FlatCompat } = require('@eslint/eslintrc');
 const js = require('@eslint/js');
 const nxEslintPlugin = require('@nx/eslint-plugin');
-const storybook = require('eslint-plugin-storybook');
+
+// eslint-plugin-storybook v10+ is ESM-only; gracefully skip if require() fails
+let storybookConfigs = [];
+try {
+  const storybook = require('eslint-plugin-storybook');
+  storybookConfigs = storybook.configs['flat/recommended'] || [];
+} catch {
+  // Storybook ESLint plugin not loadable in CJS context — skip
+}
 
 const compat = new FlatCompat({
   baseDirectory: __dirname,
@@ -12,7 +20,7 @@ module.exports = [
   {
     ignores: ['**/dist']
   },
-  ...storybook.configs['flat/recommended'],
+  ...storybookConfigs,
   { plugins: { '@nx': nxEslintPlugin } },
   {
     files: ['**/*.ts', '**/*.tsx', '**/*.js', '**/*.jsx'],

@@ -1,6 +1,3 @@
-import * as path from 'path';
-import * as fs from 'fs';
-
 export interface HoldingInput {
   symbol: string;
   name?: string;
@@ -24,7 +21,11 @@ export interface ViolationResult {
 export interface ComplianceCheckOutput {
   complianceScore: number;
   violations: ViolationResult[];
-  cleanHoldings: { symbol: string; name: string; valueInBaseCurrency: number }[];
+  cleanHoldings: {
+    symbol: string;
+    name: string;
+    valueInBaseCurrency: number;
+  }[];
   totalChecked: number;
   datasetVersion: string;
   datasetLastUpdated: string;
@@ -45,23 +46,15 @@ interface EsgDataset {
   violations: EsgViolationEntry[];
 }
 
-let cachedDataset: EsgDataset | null = null;
-
-function loadEsgDataset(): EsgDataset {
-  if (cachedDataset) {
-    return cachedDataset;
-  }
-  const dataPath = path.join(__dirname, '..', 'data', 'esg-violations.json');
-  const raw = fs.readFileSync(dataPath, 'utf-8');
-  cachedDataset = JSON.parse(raw) as EsgDataset;
-  return cachedDataset;
-}
+// Use require() for JSON — works with both ts-jest and webpack bundling
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const esgDataset: EsgDataset = require('../data/esg-violations.json');
 
 export async function complianceCheck(
   input: ComplianceCheckInput
 ): Promise<ComplianceCheckOutput> {
   const { holdings, filterCategory } = input;
-  const dataset = loadEsgDataset();
+  const dataset = esgDataset;
 
   // Build a lookup map: uppercase symbol → violation entry
   const violationMap = new Map<string, EsgViolationEntry>();
