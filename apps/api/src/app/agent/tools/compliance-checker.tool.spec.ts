@@ -120,6 +120,28 @@ describe('complianceCheck', () => {
     expect(result.violations[0].symbol).toBe('xom');
   });
 
+  it('should return 0 violations when filter category has no matches', async () => {
+    // XOM is fossil_fuels — filtering by gambling should produce 0 violations
+    const holdings: HoldingInput[] = [
+      {
+        symbol: 'XOM',
+        name: 'Exxon Mobil Corporation',
+        valueInBaseCurrency: 5000
+      },
+      { symbol: 'AAPL', name: 'Apple Inc.', valueInBaseCurrency: 3000 }
+    ];
+
+    const result = await complianceCheck({
+      holdings,
+      filterCategory: 'gambling'
+    });
+
+    expect(result.violations).toHaveLength(0);
+    expect(result.complianceScore).toBe(100);
+    expect(result.cleanHoldings).toHaveLength(2);
+    expect(result.totalChecked).toBe(2);
+  });
+
   it('should match by name when symbol is a UUID (MANUAL data source)', async () => {
     // Ghostfolio MANUAL data source assigns UUIDs as symbols
     // but keeps the original ticker in the name field
@@ -143,5 +165,26 @@ describe('complianceCheck', () => {
     expect(result.cleanHoldings).toHaveLength(1);
     // Score: (5000 / 7000) * 100 ≈ 71.43
     expect(result.complianceScore).toBeCloseTo(71.43, 0);
+  });
+
+  it('should handle multiple violations across different categories', async () => {
+    const diverseViolations: HoldingInput[] = [
+      { symbol: 'XOM', name: 'Exxon Mobil', valueInBaseCurrency: 3000 },
+      { symbol: 'LMT', name: 'Lockheed Martin', valueInBaseCurrency: 2000 },
+      { symbol: 'PM', name: 'Philip Morris', valueInBaseCurrency: 1000 },
+      { symbol: 'AAPL', name: 'Apple Inc.', valueInBaseCurrency: 4000 }
+    ];
+
+    const result = await complianceCheck({ holdings: diverseViolations });
+
+    expect(result.violations).toHaveLength(3);
+    expect(result.cleanHoldings).toHaveLength(1);
+    expect(result.totalChecked).toBe(4);
+    // Clean = 4000, Total = 10000, Score = 40
+    expect(result.complianceScore).toBe(40);
+    const violationCategories = result.violations.flatMap((v) => v.categories);
+    expect(violationCategories).toContain('fossil_fuels');
+    expect(violationCategories).toContain('weapons_defense');
+    expect(violationCategories).toContain('tobacco');
   });
 });
