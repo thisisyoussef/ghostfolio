@@ -7,13 +7,21 @@ import {
 describe('complianceCheck', () => {
   const cleanHoldings: HoldingInput[] = [
     { symbol: 'AAPL', name: 'Apple Inc.', valueInBaseCurrency: 5000 },
-    { symbol: 'MSFT', name: 'Microsoft Corporation', valueInBaseCurrency: 3000 },
+    {
+      symbol: 'MSFT',
+      name: 'Microsoft Corporation',
+      valueInBaseCurrency: 3000
+    },
     { symbol: 'GOOGL', name: 'Alphabet Inc.', valueInBaseCurrency: 2000 }
   ];
 
   const mixedHoldings: HoldingInput[] = [
     { symbol: 'AAPL', name: 'Apple Inc.', valueInBaseCurrency: 5000 },
-    { symbol: 'XOM', name: 'Exxon Mobil Corporation', valueInBaseCurrency: 2000 },
+    {
+      symbol: 'XOM',
+      name: 'Exxon Mobil Corporation',
+      valueInBaseCurrency: 2000
+    },
     { symbol: 'MSFT', name: 'Microsoft Corporation', valueInBaseCurrency: 3000 }
   ];
 
@@ -110,5 +118,30 @@ describe('complianceCheck', () => {
 
     expect(result.violations).toHaveLength(1);
     expect(result.violations[0].symbol).toBe('xom');
+  });
+
+  it('should match by name when symbol is a UUID (MANUAL data source)', async () => {
+    // Ghostfolio MANUAL data source assigns UUIDs as symbols
+    // but keeps the original ticker in the name field
+    const uuidHoldings: HoldingInput[] = [
+      {
+        symbol: 'a921354c-3177-42f9-a834-43ee37fee7be',
+        name: 'XOM',
+        valueInBaseCurrency: 2000
+      },
+      {
+        symbol: '7f2438ac-a887-4e01-a1e7-efd10889b974',
+        name: 'AAPL',
+        valueInBaseCurrency: 5000
+      }
+    ];
+
+    const result = await complianceCheck({ holdings: uuidHoldings });
+
+    expect(result.violations).toHaveLength(1);
+    expect(result.violations[0].categories).toContain('fossil_fuels');
+    expect(result.cleanHoldings).toHaveLength(1);
+    // Score: (5000 / 7000) * 100 ≈ 71.43
+    expect(result.complianceScore).toBeCloseTo(71.43, 0);
   });
 });

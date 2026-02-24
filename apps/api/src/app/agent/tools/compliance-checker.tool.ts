@@ -74,7 +74,10 @@ export async function complianceCheck(
 
   for (const holding of holdings) {
     const upperSymbol = holding.symbol.toUpperCase();
-    const entry = violationMap.get(upperSymbol);
+    // Try matching by symbol first, then by name (for MANUAL data source where
+    // Ghostfolio assigns UUIDs as symbols but keeps the ticker in the name)
+    const upperName = (holding.name || '').toUpperCase();
+    const entry = violationMap.get(upperSymbol) || violationMap.get(upperName);
     totalValue += holding.valueInBaseCurrency;
 
     if (entry) {
