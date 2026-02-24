@@ -1,0 +1,38 @@
+{
+  "version": "1.0",
+  "lastUpdated": "2025-01-15",
+  "categories": {
+    "fossil_fuels": "Companies primarily involved in oil, gas, coal extraction or energy production from fossil sources",
+    "weapons_defense": "Companies manufacturing weapons, military equipment, or providing defense services",
+    "tobacco": "Companies manufacturing, distributing, or selling tobacco products",
+    "gambling": "Companies operating gambling facilities, online betting, or gaming equipment",
+    "controversial_labor": "Companies with documented labor rights violations or exploitative practices"
+  },
+  "violations": [
+    { "symbol": "XOM", "name": "Exxon Mobil Corporation", "categories": ["fossil_fuels"], "severity": "high", "reason": "Major integrated oil and gas producer" },
+    { "symbol": "CVX", "name": "Chevron Corporation", "categories": ["fossil_fuels"], "severity": "high", "reason": "Integrated energy company, significant fossil fuel operations" },
+    { "symbol": "COP", "name": "ConocoPhillips", "categories": ["fossil_fuels"], "severity": "high", "reason": "Independent exploration and production company" },
+    { "symbol": "BP", "name": "BP plc", "categories": ["fossil_fuels"], "severity": "high", "reason": "Global oil and gas company" },
+    { "symbol": "SHEL", "name": "Shell plc", "categories": ["fossil_fuels"], "severity": "high", "reason": "Multinational oil and gas company" },
+    { "symbol": "OXY", "name": "Occidental Petroleum", "categories": ["fossil_fuels"], "severity": "medium", "reason": "Oil and gas exploration and production" },
+    { "symbol": "EOG", "name": "EOG Resources", "categories": ["fossil_fuels"], "severity": "medium", "reason": "Crude oil and natural gas exploration" },
+    { "symbol": "LMT", "name": "Lockheed Martin Corporation", "categories": ["weapons_defense"], "severity": "high", "reason": "Largest defense contractor globally" },
+    { "symbol": "RTX", "name": "RTX Corporation", "categories": ["weapons_defense"], "severity": "high", "reason": "Major aerospace and defense manufacturer" },
+    { "symbol": "NOC", "name": "Northrop Grumman Corporation", "categories": ["weapons_defense"], "severity": "high", "reason": "Aerospace and defense technology company" },
+    { "symbol": "GD", "name": "General Dynamics Corporation", "categories": ["weapons_defense"], "severity": "high", "reason": "Aerospace and defense company" },
+    { "symbol": "BA", "name": "Boeing Company", "categories": ["weapons_defense"], "severity": "medium", "reason": "Defense, space, and security division" },
+    { "symbol": "LHX", "name": "L3Harris Technologies", "categories": ["weapons_defense"], "severity": "medium", "reason": "Defense electronics and communication systems" },
+    { "symbol": "PM", "name": "Philip Morris International", "categories": ["tobacco"], "severity": "high", "reason": "Largest international tobacco company" },
+    { "symbol": "MO", "name": "Altria Group", "categories": ["tobacco"], "severity": "high", "reason": "Parent company of Philip Morris USA" },
+    { "symbol": "BTI", "name": "British American Tobacco", "categories": ["tobacco"], "severity": "high", "reason": "Multinational tobacco company" },
+    { "symbol": "TPB", "name": "Turning Point Brands", "categories": ["tobacco"], "severity": "medium", "reason": "Smokeless tobacco and smoking accessories" },
+    { "symbol": "MGM", "name": "MGM Resorts International", "categories": ["gambling"], "severity": "high", "reason": "Major casino and resort operator" },
+    { "symbol": "LVS", "name": "Las Vegas Sands", "categories": ["gambling"], "severity": "high", "reason": "Casino and resort company" },
+    { "symbol": "WYNN", "name": "Wynn Resorts", "categories": ["gambling"], "severity": "high", "reason": "Casino and resort operator" },
+    { "symbol": "CZR", "name": "Caesars Entertainment", "categories": ["gambling"], "severity": "high", "reason": "Casino and entertainment company" },
+    { "symbol": "DKNG", "name": "DraftKings", "categories": ["gambling"], "severity": "medium", "reason": "Digital sports entertainment and gaming" },
+    { "symbol": "FLUTTER", "name": "Flutter Entertainment", "categories": ["gambling"], "severity": "medium", "reason": "Online sports betting and gaming" },
+    { "symbol": "SHEIN", "name": "Shein Group", "categories": ["controversial_labor"], "severity": "high", "reason": "Documented labor rights concerns in supply chain" },
+    { "symbol": "NKE", "name": "Nike Inc", "categories": ["controversial_labor"], "severity": "medium", "reason": "Historical supply chain labor controversies" }
+  ]
+}

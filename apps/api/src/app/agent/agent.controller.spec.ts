@@ -1,3 +1,10 @@
+// Mock AgentService to avoid the deep dependency chain (redis-cache TS errors)
+jest.mock('./agent.service', () => ({
+  AgentService: jest.fn().mockImplementation(() => ({
+    chat: jest.fn()
+  }))
+}));
+
 import { Test, TestingModule } from '@nestjs/testing';
 
 import { AgentController } from './agent.controller';
@@ -50,6 +57,60 @@ describe('AgentController', () => {
     expect(service.chat).toHaveBeenCalledWith({
       message: 'What is the price of AAPL?',
       sessionId: 'test-1'
+    });
+  });
+
+  it('should route portfolio risk question to portfolio_risk_analysis tool', async () => {
+    const mockResponse = {
+      response: 'Portfolio Concentration\nTop holding: AAPL (40%)',
+      toolCalls: [
+        {
+          name: 'portfolio_risk_analysis',
+          args: { message: "What's my portfolio concentration risk?" },
+          result: '{"concentration": {"topHoldingPercent": 40}}'
+        }
+      ],
+      sessionId: 'test-portfolio'
+    };
+    (service.chat as jest.Mock).mockResolvedValue(mockResponse);
+
+    const result = await controller.chat({
+      message: "What's my portfolio concentration risk?",
+      session_id: 'test-portfolio'
+    });
+
+    expect(result.tool_calls).toHaveLength(1);
+    expect(result.tool_calls[0].name).toBe('portfolio_risk_analysis');
+    expect(service.chat).toHaveBeenCalledWith({
+      message: "What's my portfolio concentration risk?",
+      sessionId: 'test-portfolio'
+    });
+  });
+
+  it('should route ESG compliance question to compliance_check tool', async () => {
+    const mockResponse = {
+      response: 'ESG Compliance Report\nCompliance Score: 80%',
+      toolCalls: [
+        {
+          name: 'compliance_check',
+          args: { filterCategory: 'all' },
+          result: '{"complianceScore": 80, "violations": [{"symbol": "XOM"}]}'
+        }
+      ],
+      sessionId: 'test-esg'
+    };
+    (service.chat as jest.Mock).mockResolvedValue(mockResponse);
+
+    const result = await controller.chat({
+      message: 'Is my portfolio ESG compliant?',
+      session_id: 'test-esg'
+    });
+
+    expect(result.tool_calls).toHaveLength(1);
+    expect(result.tool_calls[0].name).toBe('compliance_check');
+    expect(service.chat).toHaveBeenCalledWith({
+      message: 'Is my portfolio ESG compliant?',
+      sessionId: 'test-esg'
     });
   });
 
