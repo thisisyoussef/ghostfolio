@@ -169,8 +169,12 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // Set LangSmith project so all runs/experiments land under this project
+  // Set LangSmith project and workspace so all runs/experiments land correctly
   process.env.LANGSMITH_PROJECT = LANGSMITH_PROJECT;
+  // Org-scoped service keys require workspace ID (X-Tenant-ID header)
+  if (!process.env.LANGSMITH_WORKSPACE_ID) {
+    process.env.LANGSMITH_WORKSPACE_ID = '4610debb-3062-47a4-a18d-faee6ddaa4c3';
+  }
 
   console.log(`Target: ${baseUrl}`);
   console.log(`LangSmith project: ${LANGSMITH_PROJECT}`);
