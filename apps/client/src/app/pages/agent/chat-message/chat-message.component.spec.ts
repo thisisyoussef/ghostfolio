@@ -140,7 +140,7 @@ describe('GfChatMessageComponent', () => {
     );
   });
 
-  it('keeps tool calls collapsed by default and expands on toggle', () => {
+  it('renders structured tool cards inline and keeps raw tool calls collapsed by default', () => {
     component.role = 'assistant';
     component.content = 'Result body';
     component.toolCalls = [
@@ -148,11 +148,27 @@ describe('GfChatMessageComponent', () => {
         name: 'market_data_fetch',
         args: { symbols: ['AAPL'] },
         result: '{"AAPL":{"symbol":"AAPL","price":272.14}}'
+      },
+      {
+        name: 'portfolio_risk_analysis',
+        args: {},
+        result:
+          '{"hhi":0.18,"diversificationLevel":"Moderately Diversified","topHoldings":[{"name":"AAPL","allocationInPercentage":15.2}]}'
+      },
+      {
+        name: 'compliance_check',
+        args: {},
+        result:
+          '{"compliantCount":5,"flaggedCount":1,"violations":[{"holding":"XOM","category":"fossil fuels","severity":"high","description":"Test"}]}'
       }
     ];
 
     fixture.detectChanges();
 
+    expect(fixture.debugElement.query(By.css('.inline-tool-cards'))).toBeTruthy();
+    expect(fixture.debugElement.query(By.css('.market-card'))).toBeTruthy();
+    expect(fixture.debugElement.query(By.css('.portfolio-card'))).toBeTruthy();
+    expect(fixture.debugElement.query(By.css('.esg-card'))).toBeTruthy();
     expect(fixture.debugElement.query(By.css('.tool-calls-panel'))).toBeTruthy();
     expect(fixture.debugElement.query(By.css('.tool-calls-expanded'))).toBeNull();
 
@@ -162,7 +178,10 @@ describe('GfChatMessageComponent', () => {
     fixture.detectChanges();
 
     expect(fixture.debugElement.query(By.css('.tool-calls-expanded'))).toBeTruthy();
-    expect(fixture.debugElement.query(By.css('.tool-call'))).toBeTruthy();
+    expect(fixture.debugElement.queryAll(By.css('.tool-call'))).toHaveLength(3);
+    expect(
+      fixture.debugElement.query(By.css('.tool-calls-expanded .tool-card'))
+    ).toBeNull();
     expect(
       (
         fixture.debugElement.query(By.css('.tool-name-chip')).nativeElement as HTMLElement

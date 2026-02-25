@@ -12,6 +12,14 @@
           <div class="message-content">
             <markdown [data]="renderedContent"></markdown>
           </div>
+
+          @if (hasStructuredToolCalls) {
+            <div class="inline-tool-cards">
+              @for (tc of structuredToolCalls; track $index) {
+                <gf-tool-result-card [toolCall]="tc" />
+              }
+            </div>
+          }
         } @else {
           <div class="message-content user-text">{{ content }}</div>
         }
@@ -81,15 +89,11 @@
         (click)="toggleToolCalls()"
       >
         <ion-icon [name]="showToolCalls ? 'chevron-up-outline' : 'chevron-down-outline'" />
-        {{ showToolCalls ? 'Hide' : 'Show' }} tool calls ({{ toolCalls?.length }})
+        {{ showToolCalls ? 'Hide' : 'Show' }} raw tool calls ({{ toolCalls?.length }})
       </button>
 
       @if (showToolCalls) {
         <div class="tool-calls-expanded">
-          @for (tc of toolCalls; track $index) {
-            <gf-tool-result-card [toolCall]="tc" />
-          }
-
           <div class="tool-calls-raw">
             @for (tc of toolCalls; track $index) {
               <div class="tool-call">

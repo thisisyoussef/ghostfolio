@@ -46,6 +46,15 @@ interface VerificationSummary {
   templateUrl: './chat-message.html'
 })
 export class GfChatMessageComponent {
+  private static readonly STRUCTURED_TOOL_NAMES = new Set([
+    'marketDataFetch',
+    'market_data_fetch',
+    'portfolioRiskAnalysis',
+    'portfolio_risk_analysis',
+    'complianceCheck',
+    'compliance_check'
+  ]);
+
   @Input() role: 'user' | 'assistant' = 'assistant';
   @Input() content = '';
   @Input() toolCalls?: ToolCall[];
@@ -57,6 +66,16 @@ export class GfChatMessageComponent {
 
   public get hasToolCalls(): boolean {
     return (this.toolCalls?.length ?? 0) > 0;
+  }
+
+  public get hasStructuredToolCalls(): boolean {
+    return this.structuredToolCalls.length > 0;
+  }
+
+  public get structuredToolCalls(): ToolCall[] {
+    return (this.toolCalls ?? []).filter((toolCall) => {
+      return this.isStructuredToolCall(toolCall.name);
+    });
   }
 
   public get hasVerification(): boolean {
@@ -123,6 +142,10 @@ export class GfChatMessageComponent {
 
   public toggleToolCalls() {
     this.showToolCalls = !this.showToolCalls;
+  }
+
+  private isStructuredToolCall(name: string): boolean {
+    return GfChatMessageComponent.STRUCTURED_TOOL_NAMES.has(name);
   }
 
   private stripMetadataSections(markdown: string): string {
