@@ -25,6 +25,7 @@ import {
   toolSelectionEvaluator,
   contentValidationEvaluator,
   negativeValidationEvaluator,
+  verificationMetadataEvaluator,
   overallPassEvaluator
 } from './langsmith-evaluators';
 
@@ -202,6 +203,7 @@ async function main(): Promise<void> {
       toolSelectionEvaluator,
       contentValidationEvaluator,
       negativeValidationEvaluator,
+      verificationMetadataEvaluator,
       overallPassEvaluator
     ],
     experimentPrefix: EXPERIMENT_PREFIX,

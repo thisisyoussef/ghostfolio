@@ -22,11 +22,13 @@ export interface LangSmithEvalCase {
     mustContain: string[];
     mustNotContain: string[];
     category: string;
+    requiresVerification: boolean;
   };
   metadata: {
     id: string;
     subcategory: string;
     difficulty: string;
+    coverageBucket: 'happy_path' | 'edge_case' | 'adversarial' | 'multi_step';
   };
 }
 
@@ -89,14 +91,35 @@ function toSingleTurnCase(gc: GoldenCase): LangSmithEvalCase {
       expectedTools: gc.expected_tools,
       mustContain: gc.must_contain,
       mustNotContain: gc.must_not_contain,
-      category: gc.category
+      category: gc.category,
+      requiresVerification:
+        gc.requires_verification ?? gc.expected_tools.length > 0
     },
     metadata: {
       id: gc.id,
       subcategory: gc.subcategory,
-      difficulty: gc.difficulty
+      difficulty: gc.difficulty,
+      coverageBucket: gc.coverage_bucket ?? inferCoverageBucket(gc)
     }
   };
+}
+
+function inferCoverageBucket(
+  gc: GoldenCase
+): 'happy_path' | 'edge_case' | 'adversarial' | 'multi_step' {
+  if (Array.isArray(gc.turns) && gc.turns.length > 0) {
+    return 'multi_step';
+  }
+
+  if (gc.category === 'adversarial' || gc.difficulty === 'adversarial') {
+    return 'adversarial';
+  }
+
+  if (gc.difficulty === 'edge_case') {
+    return 'edge_case';
+  }
+
+  return 'happy_path';
 }
 
 function toMultiTurnCase(gc: GoldenCase): LangSmithMultiTurnCase {

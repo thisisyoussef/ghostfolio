@@ -9,7 +9,8 @@
 import {
   checkToolSelection,
   checkContentValidation,
-  checkNegativeValidation
+  checkNegativeValidation,
+  checkVerificationMetadata
 } from './eval-runner';
 
 // ── Types matching LangSmith evaluate() callback shapes ──────────────────────
@@ -28,6 +29,7 @@ export interface LangSmithExample {
     mustContain: string[];
     mustNotContain: string[];
     category: string;
+    requiresVerification?: boolean;
     [key: string]: unknown;
   };
 }
@@ -98,11 +100,38 @@ export function overallPassEvaluator(
   const tool = toolSelectionEvaluator(run, example);
   const content = contentValidationEvaluator(run, example);
   const negative = negativeValidationEvaluator(run, example);
-  const passed = tool.score === 1 && content.score === 1 && negative.score === 1;
+  const verification = verificationMetadataEvaluator(run, example);
+  const passed =
+    tool.score === 1 &&
+    content.score === 1 &&
+    negative.score === 1 &&
+    verification.score === 1;
 
   return {
     key: 'overall_pass',
     score: passed ? 1 : 0,
-    comment: `tool=${tool.score} content=${content.score} negative=${negative.score}`
+    comment: `tool=${tool.score} content=${content.score} negative=${negative.score} verification=${verification.score}`
+  };
+}
+
+export function verificationMetadataEvaluator(
+  run: LangSmithRun,
+  example: LangSmithExample
+): EvaluatorResult {
+  const expectedTools = example.outputs.expectedTools;
+  const response = run.outputs.response || '';
+  const requiresVerification = example.outputs.requiresVerification;
+  const passed = checkVerificationMetadata({
+    expectedTools,
+    responseText: response,
+    requiresVerification
+  });
+
+  return {
+    key: 'verification_metadata',
+    score: passed ? 1 : 0,
+    comment: passed
+      ? 'Verification and sources sections are present when required'
+      : 'Missing verification/sources sections in tool-backed response'
   };
 }

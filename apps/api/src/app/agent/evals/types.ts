@@ -33,6 +33,8 @@ export interface GoldenCase {
   category: string;
   subcategory: string;
   difficulty: string;
+  coverage_bucket?: 'happy_path' | 'edge_case' | 'adversarial' | 'multi_step';
+  requires_verification?: boolean;
   expected_tools: string[];
   must_contain: string[];
   must_not_contain: string[];
@@ -56,6 +58,7 @@ export interface EvalResult {
     tool_selection: boolean;
     content_validation: boolean;
     negative_validation: boolean;
+    verification_metadata: boolean;
   };
   response_text: string;
   actual_tools: string[];

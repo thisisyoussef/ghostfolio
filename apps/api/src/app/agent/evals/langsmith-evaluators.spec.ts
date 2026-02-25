@@ -7,6 +7,7 @@ import {
   toolSelectionEvaluator,
   contentValidationEvaluator,
   negativeValidationEvaluator,
+  verificationMetadataEvaluator,
   overallPassEvaluator,
   LangSmithRun,
   LangSmithExample
@@ -17,7 +18,7 @@ import {
 function makeRun(overrides: Partial<LangSmithRun['outputs']> = {}): LangSmithRun {
   return {
     outputs: {
-      response: 'AAPL is currently trading at $195.50',
+      response: 'AAPL is currently trading at $195.50\n\n### Verification\nConfidence: 95/100\n\n### Sources\n- Yahoo Finance',
       tool_calls: [{ name: 'market_data_fetch', args: {}, result: '{}' }],
       ...overrides
     }
@@ -33,6 +34,7 @@ function makeExample(
       mustContain: ['AAPL'],
       mustNotContain: ['unable to', 'I don\'t know'],
       category: 'market_data',
+      requiresVerification: true,
       ...overrides
     }
   };
@@ -143,7 +145,7 @@ describe('negativeValidationEvaluator', () => {
 // ── overallPassEvaluator ─────────────────────────────────────────────────────
 
 describe('overallPassEvaluator', () => {
-  it('should return score 1 when all three checks pass', () => {
+  it('should return score 1 when all checks pass', () => {
     const result = overallPassEvaluator(makeRun(), makeExample());
     expect(result.key).toBe('overall_pass');
     expect(result.score).toBe(1);
@@ -171,5 +173,39 @@ describe('overallPassEvaluator', () => {
       makeExample()
     );
     expect(result.score).toBe(0);
+  });
+
+  it('should return score 0 when verification metadata check fails', () => {
+    const result = overallPassEvaluator(
+      makeRun({ response: 'AAPL is currently trading at $195.50' }),
+      makeExample({ requiresVerification: true })
+    );
+    expect(result.score).toBe(0);
+  });
+});
+
+// ── verificationMetadataEvaluator ───────────────────────────────────────────
+
+describe('verificationMetadataEvaluator', () => {
+  it('should return score 1 when verification metadata is present', () => {
+    const result = verificationMetadataEvaluator(makeRun(), makeExample());
+    expect(result.key).toBe('verification_metadata');
+    expect(result.score).toBe(1);
+  });
+
+  it('should return score 0 when tool-backed response misses metadata', () => {
+    const result = verificationMetadataEvaluator(
+      makeRun({ response: 'AAPL is currently trading at $195.50' }),
+      makeExample({ requiresVerification: true })
+    );
+    expect(result.score).toBe(0);
+  });
+
+  it('should return score 1 when no verification is required', () => {
+    const result = verificationMetadataEvaluator(
+      makeRun({ response: 'Please provide a message.' }),
+      makeExample({ expectedTools: [], requiresVerification: false })
+    );
+    expect(result.score).toBe(1);
   });
 });

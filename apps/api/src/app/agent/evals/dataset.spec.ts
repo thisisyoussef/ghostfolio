@@ -23,13 +23,13 @@ describe('dataset adapter (golden-data.yaml → LangSmith format)', () => {
       expect(Array.isArray(result.multiTurnCases)).toBe(true);
     });
 
-    it('should produce 22 single-turn cases and 5 multi-turn cases from 27 golden cases', () => {
-      expect(result.singleTurnCases).toHaveLength(22);
-      expect(result.multiTurnCases).toHaveLength(5);
+    it('should produce 45 single-turn cases and 10 multi-turn cases from 55 golden cases', () => {
+      expect(result.singleTurnCases).toHaveLength(45);
+      expect(result.multiTurnCases).toHaveLength(10);
     });
 
-    it('should produce totalCases equal to 27', () => {
-      expect(result.totalCases).toBe(27);
+    it('should produce totalCases equal to 55', () => {
+      expect(result.totalCases).toBe(55);
     });
   });
 
@@ -52,15 +52,18 @@ describe('dataset adapter (golden-data.yaml → LangSmith format)', () => {
       expect(firstCase.outputs).toHaveProperty('mustContain');
       expect(firstCase.outputs).toHaveProperty('mustNotContain');
       expect(firstCase.outputs).toHaveProperty('category');
+      expect(firstCase.outputs).toHaveProperty('requiresVerification');
       expect(Array.isArray(firstCase.outputs.expectedTools)).toBe(true);
       expect(Array.isArray(firstCase.outputs.mustContain)).toBe(true);
       expect(Array.isArray(firstCase.outputs.mustNotContain)).toBe(true);
+      expect(typeof firstCase.outputs.requiresVerification).toBe('boolean');
     });
 
     it('should have metadata with id, subcategory, difficulty', () => {
       expect(firstCase.metadata).toHaveProperty('id');
       expect(firstCase.metadata).toHaveProperty('subcategory');
       expect(firstCase.metadata).toHaveProperty('difficulty');
+      expect(firstCase.metadata).toHaveProperty('coverageBucket');
     });
 
     it('should map gs-001 correctly (AAPL price query)', () => {

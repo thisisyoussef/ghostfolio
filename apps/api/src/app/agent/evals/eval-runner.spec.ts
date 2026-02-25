@@ -5,8 +5,12 @@ import {
   checkToolSelection,
   checkContentValidation,
   checkNegativeValidation,
+  checkVerificationMetadata,
   computeSummary,
-  buildCoverageMatrix
+  buildCoverageMatrix,
+  computeCoverageDistribution,
+  validateCoverageDistribution,
+  validateRequiredCategoryBuckets
 } from './eval-runner';
 import { EvalResult, GoldenCase } from './types';
 
@@ -15,9 +19,9 @@ import { EvalResult, GoldenCase } from './types';
 describe('loadGoldenData', () => {
   const yamlPath = path.resolve(__dirname, 'golden-data.yaml');
 
-  it('should parse golden-data.yaml and return all 27 cases', () => {
+  it('should parse golden-data.yaml and return all 55 cases', () => {
     const data = loadGoldenData(yamlPath);
-    expect(data.cases).toHaveLength(27);
+    expect(data.cases).toHaveLength(55);
   });
 
   it('should parse single-turn cases with query field', () => {
@@ -126,6 +130,47 @@ describe('checkNegativeValidation', () => {
   });
 });
 
+// ── checkVerificationMetadata ───────────────────────────────────────────────
+
+describe('checkVerificationMetadata', () => {
+  it('should pass for tool-backed response with verification sections', () => {
+    expect(
+      checkVerificationMetadata({
+        expectedTools: ['market_data_fetch'],
+        responseText: '... \n### Verification\n...\n### Sources\n...'
+      })
+    ).toBe(true);
+  });
+
+  it('should fail for tool-backed response missing sections', () => {
+    expect(
+      checkVerificationMetadata({
+        expectedTools: ['market_data_fetch'],
+        responseText: 'AAPL is currently trading at $195.'
+      })
+    ).toBe(false);
+  });
+
+  it('should pass for non-tool responses by default', () => {
+    expect(
+      checkVerificationMetadata({
+        expectedTools: [],
+        responseText: 'Please provide a message to continue.'
+      })
+    ).toBe(true);
+  });
+
+  it('should enforce verification when requiresVerification is true', () => {
+    expect(
+      checkVerificationMetadata({
+        expectedTools: [],
+        responseText: 'No sections',
+        requiresVerification: true
+      })
+    ).toBe(false);
+  });
+});
+
 // ── computeSummary ──────────────────────────────────────────────────────────
 
 describe('computeSummary', () => {
@@ -166,7 +211,12 @@ describe('computeSummary', () => {
     {
       case_id: 'gs-001',
       passed: true,
-      checks: { tool_selection: true, content_validation: true, negative_validation: true },
+      checks: {
+        tool_selection: true,
+        content_validation: true,
+        negative_validation: true,
+        verification_metadata: true
+      },
       response_text: 'AAPL: $195',
       actual_tools: ['market_data_fetch'],
       duration_ms: 100
@@ -174,7 +224,12 @@ describe('computeSummary', () => {
     {
       case_id: 'gs-006',
       passed: false,
-      checks: { tool_selection: false, content_validation: true, negative_validation: true },
+      checks: {
+        tool_selection: false,
+        content_validation: true,
+        negative_validation: true,
+        verification_metadata: false
+      },
       response_text: 'error',
       actual_tools: [],
       duration_ms: 50
@@ -182,7 +237,12 @@ describe('computeSummary', () => {
     {
       case_id: 'gs-004',
       passed: true,
-      checks: { tool_selection: true, content_validation: true, negative_validation: true },
+      checks: {
+        tool_selection: true,
+        content_validation: true,
+        negative_validation: true,
+        verification_metadata: true
+      },
       response_text: 'XYZNOTREAL: error',
       actual_tools: ['market_data_fetch'],
       duration_ms: 75
@@ -256,7 +316,12 @@ describe('buildCoverageMatrix', () => {
     {
       case_id: 'gs-001',
       passed: true,
-      checks: { tool_selection: true, content_validation: true, negative_validation: true },
+      checks: {
+        tool_selection: true,
+        content_validation: true,
+        negative_validation: true,
+        verification_metadata: true
+      },
       response_text: 'AAPL: $195',
       actual_tools: ['market_data_fetch'],
       duration_ms: 100
@@ -264,7 +329,12 @@ describe('buildCoverageMatrix', () => {
     {
       case_id: 'gs-004',
       passed: false,
-      checks: { tool_selection: true, content_validation: false, negative_validation: true },
+      checks: {
+        tool_selection: true,
+        content_validation: false,
+        negative_validation: true,
+        verification_metadata: false
+      },
       response_text: 'error',
       actual_tools: ['market_data_fetch'],
       duration_ms: 75
@@ -288,5 +358,70 @@ describe('buildCoverageMatrix', () => {
 
     // "ambiguous" difficulty has no cases
     expect(matrix['ambiguous']).toBeUndefined();
+  });
+});
+
+// ── coverage distribution and required buckets ──────────────────────────────
+
+describe('coverage distribution gates', () => {
+  const yamlPath = path.resolve(__dirname, 'golden-data.yaml');
+
+  it('should meet minimum coverage distribution requirements', () => {
+    const data = loadGoldenData(yamlPath);
+    const distribution = computeCoverageDistribution(data.cases);
+    const validation = validateCoverageDistribution(data.cases);
+
+    expect(distribution.happy_path).toBeGreaterThanOrEqual(20);
+    expect(distribution.edge_case).toBeGreaterThanOrEqual(10);
+    expect(distribution.adversarial).toBeGreaterThanOrEqual(10);
+    expect(distribution.multi_step).toBeGreaterThanOrEqual(10);
+    expect(validation.passed).toBe(true);
+    expect(validation.failures).toHaveLength(0);
+  });
+
+  it('should fail validation when adversarial bucket is below minimum', () => {
+    const cases: GoldenCase[] = [
+      {
+        id: 'a',
+        query: 'q',
+        category: 'market_data',
+        subcategory: 'x',
+        difficulty: 'straightforward',
+        coverage_bucket: 'happy_path',
+        expected_tools: ['market_data_fetch'],
+        must_contain: [],
+        must_not_contain: []
+      },
+      {
+        id: 'b',
+        query: 'q',
+        category: 'multi_turn',
+        subcategory: 'x',
+        difficulty: 'ambiguous',
+        coverage_bucket: 'multi_step',
+        expected_tools: [],
+        must_contain: [],
+        must_not_contain: [],
+        turns: [
+          {
+            query: 'turn-1',
+            expected_tools: [],
+            must_contain: [],
+            must_not_contain: []
+          }
+        ]
+      }
+    ];
+
+    const validation = validateCoverageDistribution(cases);
+    expect(validation.passed).toBe(false);
+    expect(validation.failures.join(' ')).toContain('"adversarial"');
+  });
+
+  it('should ensure required category buckets are present', () => {
+    const data = loadGoldenData(yamlPath);
+    const validation = validateRequiredCategoryBuckets(data.cases);
+    expect(validation.passed).toBe(true);
+    expect(validation.missing).toEqual([]);
   });
 });

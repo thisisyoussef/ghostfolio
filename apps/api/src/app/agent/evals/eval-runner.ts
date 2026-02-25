@@ -10,6 +10,23 @@ import {
   GoldenDataFile
 } from './types';
 
+type CoverageBucket = 'happy_path' | 'edge_case' | 'adversarial' | 'multi_step';
+
+const COVERAGE_MINIMUMS: Record<CoverageBucket, number> = {
+  happy_path: 20,
+  edge_case: 10,
+  adversarial: 10,
+  multi_step: 10
+};
+
+const REQUIRED_CATEGORY_BUCKETS = [
+  'market_data',
+  'portfolio',
+  'compliance',
+  'adversarial',
+  'multi_turn'
+] as const;
+
 // ── Pure functions (exported for testing) ────────────────────────────────────
 
 /**
@@ -65,6 +82,118 @@ export function checkNegativeValidation(
   }
   const lower = responseText.toLowerCase();
   return mustNotContain.every((s) => !lower.includes(s.toLowerCase()));
+}
+
+/**
+ * Check verification metadata sections where required.
+ * Tool-backed responses should contain both verification and sources sections.
+ */
+export function checkVerificationMetadata(args: {
+  expectedTools: string[];
+  responseText: string;
+  requiresVerification?: boolean;
+}): boolean {
+  const {
+    expectedTools,
+    responseText,
+    requiresVerification = expectedTools.length > 0
+  } = args;
+
+  if (!requiresVerification) {
+    return true;
+  }
+
+  return (
+    /^#{2,3}\s*verification\b/im.test(responseText) &&
+    /^#{2,3}\s*sources\b/im.test(responseText)
+  );
+}
+
+export function inferCoverageBucket(goldenCase: GoldenCase): CoverageBucket {
+  if (goldenCase.coverage_bucket) {
+    return goldenCase.coverage_bucket;
+  }
+
+  if (Array.isArray(goldenCase.turns) && goldenCase.turns.length > 0) {
+    return 'multi_step';
+  }
+
+  if (
+    goldenCase.category === 'adversarial' ||
+    goldenCase.difficulty === 'adversarial'
+  ) {
+    return 'adversarial';
+  }
+
+  if (goldenCase.difficulty === 'edge_case') {
+    return 'edge_case';
+  }
+
+  return 'happy_path';
+}
+
+export function computeCoverageDistribution(
+  cases: GoldenCase[]
+): Record<CoverageBucket, number> {
+  const distribution: Record<CoverageBucket, number> = {
+    happy_path: 0,
+    edge_case: 0,
+    adversarial: 0,
+    multi_step: 0
+  };
+
+  for (const goldenCase of cases) {
+    distribution[inferCoverageBucket(goldenCase)]++;
+  }
+
+  return distribution;
+}
+
+export function validateCoverageDistribution(cases: GoldenCase[]): {
+  distribution: Record<CoverageBucket, number>;
+  failures: string[];
+  passed: boolean;
+} {
+  const distribution = computeCoverageDistribution(cases);
+  const failures: string[] = [];
+
+  for (const [bucket, minimum] of Object.entries(COVERAGE_MINIMUMS) as Array<
+    [CoverageBucket, number]
+  >) {
+    if (distribution[bucket] < minimum) {
+      failures.push(
+        `coverage bucket "${bucket}" has ${distribution[bucket]} cases (< ${minimum})`
+      );
+    }
+  }
+
+  return {
+    distribution,
+    failures,
+    passed: failures.length === 0
+  };
+}
+
+export function validateRequiredCategoryBuckets(cases: GoldenCase[]): {
+  counts: Record<string, number>;
+  missing: string[];
+  passed: boolean;
+} {
+  const counts: Record<string, number> = {};
+
+  for (const goldenCase of cases) {
+    counts[goldenCase.category] = (counts[goldenCase.category] ?? 0) + 1;
+  }
+
+  const missing = REQUIRED_CATEGORY_BUCKETS.filter((bucket) => {
+    return (counts[bucket] ?? 0) === 0;
+  });
+
+  return {
+    counts,
+    missing,
+    passed: missing.length === 0
+  };
 }
 
 /**
@@ -245,13 +374,27 @@ async function evaluateSingleTurn(
       goldenCase.must_not_contain,
       response.response
     );
+    const verification_metadata = checkVerificationMetadata({
+      expectedTools: goldenCase.expected_tools,
+      responseText: response.response,
+      requiresVerification: goldenCase.requires_verification
+    });
 
-    const passed = tool_selection && content_validation && negative_validation;
+    const passed =
+      tool_selection &&
+      content_validation &&
+      negative_validation &&
+      verification_metadata;
 
     return {
       case_id: goldenCase.id,
       passed,
-      checks: { tool_selection, content_validation, negative_validation },
+      checks: {
+        tool_selection,
+        content_validation,
+        negative_validation,
+        verification_metadata
+      },
       response_text: response.response,
       actual_tools: actualTools,
       duration_ms
@@ -263,7 +406,8 @@ async function evaluateSingleTurn(
       checks: {
         tool_selection: false,
         content_validation: false,
-        negative_validation: false
+        negative_validation: false,
+        verification_metadata: false
       },
       response_text: '',
       actual_tools: [],
@@ -289,7 +433,8 @@ async function evaluateMultiTurn(
     const overallChecks = {
       tool_selection: true,
       content_validation: true,
-      negative_validation: true
+      negative_validation: true,
+      verification_metadata: true
     };
 
     for (const turn of turns) {
@@ -306,12 +451,18 @@ async function evaluateMultiTurn(
         turn.must_not_contain,
         response.response
       );
+      const verificationOk = checkVerificationMetadata({
+        expectedTools: turn.expected_tools,
+        responseText: response.response,
+        requiresVerification: goldenCase.requires_verification
+      });
 
       if (!toolOk) overallChecks.tool_selection = false;
       if (!contentOk) overallChecks.content_validation = false;
       if (!negativeOk) overallChecks.negative_validation = false;
+      if (!verificationOk) overallChecks.verification_metadata = false;
 
-      if (!toolOk || !contentOk || !negativeOk) {
+      if (!toolOk || !contentOk || !negativeOk || !verificationOk) {
         allPassed = false;
       }
 
@@ -334,7 +485,8 @@ async function evaluateMultiTurn(
       checks: {
         tool_selection: false,
         content_validation: false,
-        negative_validation: false
+        negative_validation: false,
+        verification_metadata: false
       },
       response_text: '',
       actual_tools: [],
@@ -350,9 +502,15 @@ function printResultsTable(results: EvalResult[], cases: GoldenCase[]): void {
     caseMap.set(c.id, c);
   }
 
-  console.log('\n┌──────────┬──────────────┬────────────┬──────┬───────┬─────────┬──────────┐');
-  console.log('│ ID       │ Category     │ Difficulty │ Pass │ Tools │ Content │ Negative │');
-  console.log('├──────────┼──────────────┼────────────┼──────┼───────┼─────────┼──────────┤');
+  console.log(
+    '\n┌──────────┬──────────────┬────────────┬──────┬───────┬─────────┬──────────┬──────────┐'
+  );
+  console.log(
+    '│ ID       │ Category     │ Difficulty │ Pass │ Tools │ Content │ Negative │ Verif    │'
+  );
+  console.log(
+    '├──────────┼──────────────┼────────────┼──────┼───────┼─────────┼──────────┼──────────┤'
+  );
 
   for (const result of results) {
     const gc = caseMap.get(result.case_id);
@@ -363,10 +521,15 @@ function printResultsTable(results: EvalResult[], cases: GoldenCase[]): void {
     const tool = result.checks.tool_selection ? '  OK ' : ' FAIL';
     const cont = result.checks.content_validation ? '   OK  ' : '  FAIL ';
     const neg = result.checks.negative_validation ? '   OK   ' : '  FAIL  ';
-    console.log(`│ ${id} │ ${cat} │ ${diff} │ ${pass} │${tool} │${cont} │${neg} │`);
+    const ver = result.checks.verification_metadata ? '   OK   ' : '  FAIL  ';
+    console.log(
+      `│ ${id} │ ${cat} │ ${diff} │ ${pass} │${tool} │${cont} │${neg} │${ver} │`
+    );
   }
 
-  console.log('└──────────┴──────────────┴────────────┴──────┴───────┴─────────┴──────────┘');
+  console.log(
+    '└──────────┴──────────────┴────────────┴──────┴───────┴─────────┴──────────┴──────────┘'
+  );
 }
 
 function printSummary(summary: EvalSummary): void {
@@ -420,6 +583,33 @@ async function main(): Promise<void> {
   const yamlPath = require('path').resolve(__dirname, 'golden-data.yaml');
   const goldenData = loadGoldenData(yamlPath);
   console.log(`Loaded ${goldenData.cases.length} golden cases (v${goldenData.version}, stage ${goldenData.stage})\n`);
+
+  if (goldenData.cases.length < 50) {
+    console.error(
+      `FAIL: golden dataset has ${goldenData.cases.length} cases (< 50 required)`
+    );
+    process.exit(1);
+  }
+
+  const coverageValidation = validateCoverageDistribution(goldenData.cases);
+  console.log('Coverage buckets:');
+  console.log(
+    `  happy_path=${coverageValidation.distribution.happy_path}, edge_case=${coverageValidation.distribution.edge_case}, adversarial=${coverageValidation.distribution.adversarial}, multi_step=${coverageValidation.distribution.multi_step}`
+  );
+  if (!coverageValidation.passed) {
+    for (const failure of coverageValidation.failures) {
+      console.error(`  - ${failure}`);
+    }
+    process.exit(1);
+  }
+
+  const categoryValidation = validateRequiredCategoryBuckets(goldenData.cases);
+  if (!categoryValidation.passed) {
+    console.error(
+      `FAIL: missing required category buckets: ${categoryValidation.missing.join(', ')}`
+    );
+    process.exit(1);
+  }
 
   // Authenticate
   console.log('Authenticating...');
