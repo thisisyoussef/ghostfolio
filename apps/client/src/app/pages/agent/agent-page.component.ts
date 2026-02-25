@@ -2,6 +2,8 @@ import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import {
   AfterViewChecked,
+  ChangeDetectionStrategy,
+  ChangeDetectorRef,
   Component,
   CUSTOM_ELEMENTS_SCHEMA,
   ElementRef,
@@ -50,6 +52,7 @@ interface ChatResponse {
 }
 
 @Component({
+  changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'page' },
   imports: [
     CommonModule,
@@ -73,7 +76,10 @@ export class GfAgentPageComponent implements AfterViewChecked {
 
   private shouldScroll = false;
 
-  public constructor(private http: HttpClient) {
+  public constructor(
+    private changeDetectorRef: ChangeDetectorRef,
+    private http: HttpClient
+  ) {
     addIcons({
       checkmarkCircleOutline,
       constructOutline,
@@ -120,6 +126,7 @@ export class GfAgentPageComponent implements AfterViewChecked {
           });
           this.isLoading = false;
           this.shouldScroll = true;
+          this.changeDetectorRef.markForCheck();
         },
         error: (error) => {
           this.messages.push({
@@ -128,6 +135,7 @@ export class GfAgentPageComponent implements AfterViewChecked {
           });
           this.isLoading = false;
           this.shouldScroll = true;
+          this.changeDetectorRef.markForCheck();
         }
       });
   }
