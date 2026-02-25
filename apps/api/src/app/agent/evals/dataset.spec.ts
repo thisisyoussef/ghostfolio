@@ -23,13 +23,13 @@ describe('dataset adapter (golden-data.yaml → LangSmith format)', () => {
       expect(Array.isArray(result.multiTurnCases)).toBe(true);
     });
 
-    it('should produce 17 single-turn cases and 3 multi-turn cases from 20 golden cases', () => {
-      expect(result.singleTurnCases).toHaveLength(17);
-      expect(result.multiTurnCases).toHaveLength(3);
+    it('should produce 19 single-turn cases and 5 multi-turn cases from 24 golden cases', () => {
+      expect(result.singleTurnCases).toHaveLength(19);
+      expect(result.multiTurnCases).toHaveLength(5);
     });
 
-    it('should produce totalCases equal to 20', () => {
-      expect(result.totalCases).toBe(20);
+    it('should produce totalCases equal to 24', () => {
+      expect(result.totalCases).toBe(24);
     });
   });
 
