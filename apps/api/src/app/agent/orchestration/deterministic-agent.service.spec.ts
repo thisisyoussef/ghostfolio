@@ -133,6 +133,19 @@ describe('DeterministicAgentService', () => {
     expect(response.response).toContain('Estimated shortfall');
   });
 
+  it('should route rate-uncertainty prompts to scenario_analysis', async () => {
+    const response = await service.chat({
+      message:
+        'I hold 60% bonds and 40% equities. Help me think about rate uncertainty.',
+      sessionId: TEST_SESSION,
+      userId: TEST_USER
+    });
+
+    expect(response.toolCalls).toHaveLength(1);
+    expect(response.toolCalls[0].name).toBe('scenario_analysis');
+    expect(response.response).toContain('Scenario Analysis');
+  });
+
   it('should avoid market_data_fetch misrouting for "add bonds" hypothetical phrasing', async () => {
     const response = await service.chat({
       message: 'What if I reduce tech exposure by 15% and add bonds?',
