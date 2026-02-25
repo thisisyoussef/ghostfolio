@@ -336,7 +336,7 @@ cases:
         must_contain:
           - "Portfolio"
         must_not_contain:
-          - "AAPL"
+          - "I can help you with"
     expected_tools:
       - "portfolio_risk_analysis"
     must_contain:
