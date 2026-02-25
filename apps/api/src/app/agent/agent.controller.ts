@@ -28,6 +28,8 @@ interface ChatResponseDto {
   response: string;
   tool_calls: ToolCallDto[];
   session_id: string;
+  is_error?: boolean;
+  error_type?: string;
 }
 
 @Controller('agent')
@@ -46,10 +48,17 @@ export class AgentController {
       userId: this.request.user.id
     });
 
-    return {
+    const dto: ChatResponseDto = {
       response: result.response,
       tool_calls: result.toolCalls,
       session_id: result.sessionId
     };
+
+    if (result.isError) {
+      dto.is_error = true;
+      dto.error_type = result.errorType;
+    }
+
+    return dto;
   }
 }

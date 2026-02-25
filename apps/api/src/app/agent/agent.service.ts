@@ -2,6 +2,8 @@ import { PortfolioService } from '@ghostfolio/api/app/portfolio/portfolio.servic
 
 import { Injectable } from '@nestjs/common';
 
+import { AgentError, ErrorType } from './errors/agent-error';
+import { SessionMemoryService } from './memory/session-memory.service';
 import { complianceCheck } from './tools/compliance-checker.tool';
 import { marketDataFetch } from './tools/market-data.tool';
 import { portfolioRiskAnalysis } from './tools/portfolio-analysis.tool';
@@ -16,6 +18,8 @@ export interface ChatResponse {
   response: string;
   toolCalls: ToolCallInfo[];
   sessionId: string;
+  isError?: boolean;
+  errorType?: string;
 }
 
 // Keywords that indicate ESG/compliance questions
@@ -95,7 +99,8 @@ export function detectCategoryFilter(message: string): string | undefined {
 @Injectable()
 export class AgentService {
   constructor(
-    private readonly portfolioService: PortfolioService
+    private readonly portfolioService: PortfolioService,
+    private readonly sessionMemory: SessionMemoryService
   ) {}
 
   async chat(input: {
@@ -123,8 +128,9 @@ export class AgentService {
       return this.handlePortfolioQuestion(message, sessionId, userId);
     }
 
-    // Extract ticker symbols from the message (basic pattern matching)
-    const symbols = this.extractSymbols(message);
+    // Use context resolution for symbol extraction (supports follow-ups)
+    const context = this.resolveContext(message, sessionId);
+    const symbols = context.symbols;
 
     if (symbols.length === 0) {
       return {
@@ -139,34 +145,63 @@ export class AgentService {
       };
     }
 
-    // Fetch market data
-    const marketData = await marketDataFetch({ symbols });
-    const toolCalls: ToolCallInfo[] = [
-      {
-        name: 'market_data_fetch',
-        args: { symbols },
-        result: JSON.stringify(marketData)
-      }
-    ];
+    // Fetch market data with error handling
+    try {
+      const marketData = await marketDataFetch({ symbols });
+      const toolCalls: ToolCallInfo[] = [
+        {
+          name: 'market_data_fetch',
+          args: { symbols },
+          result: JSON.stringify(marketData)
+        }
+      ];
 
-    // Build response text
-    const parts: string[] = [];
-    for (const symbol of symbols) {
-      const data = marketData[symbol];
-      if (data.error) {
-        parts.push(`${symbol}: ${data.error}`);
-      } else {
-        const priceStr = data.price ? `$${data.price.toFixed(2)}` : 'N/A';
-        const nameStr = data.name ? ` (${data.name})` : '';
-        parts.push(`${symbol}${nameStr}: ${priceStr}`);
+      const parts: string[] = [];
+      for (const symbol of symbols) {
+        const data = marketData[symbol];
+        if (data.error) {
+          parts.push(`${symbol}: ${data.error}`);
+        } else {
+          const priceStr = data.price ? `$${data.price.toFixed(2)}` : 'N/A';
+          const nameStr = data.name ? ` (${data.name})` : '';
+          parts.push(`${symbol}${nameStr}: ${priceStr}`);
+        }
       }
+
+      // Update session memory after successful tool call
+      this.sessionMemory.updateSession(sessionId, {
+        lastSymbols: symbols,
+        lastTool: 'market_data',
+        lastTopic: null
+      });
+
+      return {
+        response: parts.join('\n'),
+        toolCalls,
+        sessionId
+      };
+    } catch (err) {
+      const classified =
+        err instanceof AgentError
+          ? err
+          : new AgentError(
+              ErrorType.DATA,
+              'Failed to fetch market data. Please try again later.',
+              true,
+              err instanceof Error ? err : undefined
+            );
+      console.error(
+        `[agent] ${classified.type} error:`,
+        classified.userMessage
+      );
+      return {
+        response: classified.userMessage,
+        toolCalls: [],
+        sessionId,
+        isError: true,
+        errorType: classified.type
+      };
     }
-
-    return {
-      response: parts.join('\n'),
-      toolCalls,
-      sessionId
-    };
   }
 
   private detectCategoryFilter(message: string): string | undefined {
@@ -193,7 +228,9 @@ export class AgentService {
         response:
           'Unable to check portfolio compliance — portfolio service unavailable.',
         toolCalls: [],
-        sessionId
+        sessionId,
+        isError: true,
+        errorType: ErrorType.SERVICE
       };
     }
 
@@ -268,6 +305,13 @@ export class AgentService {
       }
     }
 
+    // Update session memory after successful compliance check
+    this.sessionMemory.updateSession(sessionId, {
+      lastSymbols: [],
+      lastTool: 'compliance',
+      lastTopic: filterCategory || 'esg'
+    });
+
     return {
       response: parts.join('\n'),
       toolCalls,
@@ -280,76 +324,152 @@ export class AgentService {
     sessionId: string,
     userId: string
   ): Promise<ChatResponse> {
-    const result = await portfolioRiskAnalysis(
-      {},
-      this.portfolioService,
-      userId
-    );
+    try {
+      const result = await portfolioRiskAnalysis(
+        {},
+        this.portfolioService,
+        userId
+      );
 
-    const toolCalls: ToolCallInfo[] = [
-      {
-        name: 'portfolio_risk_analysis',
-        args: { message },
-        result: JSON.stringify(result)
+      const toolCalls: ToolCallInfo[] = [
+        {
+          name: 'portfolio_risk_analysis',
+          args: { message },
+          result: JSON.stringify(result)
+        }
+      ];
+
+      if (result.error) {
+        return {
+          response: result.error,
+          toolCalls,
+          sessionId,
+          isError: true,
+          errorType: ErrorType.SERVICE
+        };
       }
-    ];
 
-    if (result.error) {
+      // Build human-readable response
+      const parts: string[] = [];
+      const fmt = (n: number) =>
+        n.toLocaleString(undefined, {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2
+        });
+
+      // Concentration section
+      const c = result.concentration;
+      parts.push('### 📊 Portfolio Risk Overview');
+      parts.push('');
+      parts.push(
+        `- **Top holding:** ${c.topHoldingSymbol} at ${c.topHoldingPercent}%`
+      );
+      parts.push(`- **Diversification:** ${c.diversificationLevel}`);
+
+      if (c.topHoldings.length > 1) {
+        parts.push('');
+        parts.push('**Top Holdings**');
+        parts.push('');
+        for (const h of c.topHoldings) {
+          const label =
+            h.symbol === h.name ? h.name : `${h.symbol} — ${h.name}`;
+          parts.push(`- ${label}: **${h.percentage}%**`);
+        }
+      }
+
+      // Allocation section
+      parts.push('');
+      parts.push('### 📈 Asset Allocation');
+      parts.push('');
+      for (const [assetClass, pct] of Object.entries(
+        result.allocation.byAssetClass
+      )) {
+        parts.push(`- ${assetClass}: **${pct}%**`);
+      }
+
+      // Performance section
+      const p = result.performance;
+      const sign = p.totalReturn >= 0 ? '+' : '';
+      parts.push('');
+      parts.push('### 💰 Performance Summary');
+      parts.push('');
+      parts.push(`- **Current value:** $${fmt(p.currentValue)}`);
+      parts.push(`- **Total invested:** $${fmt(p.totalInvestment)}`);
+      parts.push(
+        `- **Total return:** ${sign}$${fmt(p.totalReturn)} (${sign}${p.totalReturnPercent}%)`
+      );
+
+      parts.push('');
+      parts.push(`*${result.holdingsCount} holdings analyzed*`);
+
+      // Update session memory after successful portfolio analysis
+      this.sessionMemory.updateSession(sessionId, {
+        lastSymbols: [],
+        lastTool: 'portfolio',
+        lastTopic: 'risk_analysis'
+      });
+
       return {
-        response: result.error,
+        response: parts.join('\n'),
         toolCalls,
         sessionId
       };
+    } catch (err) {
+      const classified =
+        err instanceof AgentError
+          ? err
+          : new AgentError(
+              ErrorType.SERVICE,
+              'Unable to access portfolio data. Please try again later.',
+              true,
+              err instanceof Error ? err : undefined
+            );
+      console.error(
+        `[agent] ${classified.type} error:`,
+        classified.userMessage
+      );
+      return {
+        response: classified.userMessage,
+        toolCalls: [],
+        sessionId,
+        isError: true,
+        errorType: classified.type
+      };
+    }
+  }
+
+  private resolveContext(
+    message: string,
+    sessionId: string
+  ): { symbols: string[]; tool: string | null } {
+    const session = this.sessionMemory.getSession(sessionId);
+    if (!session) {
+      return { symbols: this.extractSymbols(message), tool: null };
     }
 
-    // Build human-readable response
-    const parts: string[] = [];
-    const fmt = (n: number) =>
-      n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    // Check for follow-up patterns: "what about X?", "how about X?", "and X?"
+    const followUpMatch =
+      message.match(/(?:what|how)\s+about\s+([A-Z]{1,5})\b/i) ||
+      message.match(/\band\s+([A-Z]{1,5})\b/i);
 
-    // Concentration section
-    const c = result.concentration;
-    parts.push('### 📊 Portfolio Risk Overview');
-    parts.push('');
-    parts.push(`- **Top holding:** ${c.topHoldingSymbol} at ${c.topHoldingPercent}%`);
-    parts.push(`- **Diversification:** ${c.diversificationLevel}`);
+    if (followUpMatch) {
+      const newSymbol = followUpMatch[1].toUpperCase();
+      return { symbols: [newSymbol], tool: session.lastTool };
+    }
 
-    if (c.topHoldings.length > 1) {
-      parts.push('');
-      parts.push('**Top Holdings**');
-      parts.push('');
-      for (const h of c.topHoldings) {
-        const label = h.symbol === h.name ? h.name : `${h.symbol} — ${h.name}`;
-        parts.push(`- ${label}: **${h.percentage}%**`);
+    // If no symbols/keywords detected, fall back to session context
+    const extracted = this.extractSymbols(message);
+    if (
+      extracted.length === 0 &&
+      !isEsgQuestion(message) &&
+      !isPortfolioQuestion(message)
+    ) {
+      if (session.lastSymbols.length > 0) {
+        return { symbols: session.lastSymbols, tool: session.lastTool };
       }
     }
 
-    // Allocation section
-    parts.push('');
-    parts.push('### 📈 Asset Allocation');
-    parts.push('');
-    for (const [assetClass, pct] of Object.entries(result.allocation.byAssetClass)) {
-      parts.push(`- ${assetClass}: **${pct}%**`);
-    }
-
-    // Performance section
-    const p = result.performance;
-    const sign = p.totalReturn >= 0 ? '+' : '';
-    parts.push('');
-    parts.push('### 💰 Performance Summary');
-    parts.push('');
-    parts.push(`- **Current value:** $${fmt(p.currentValue)}`);
-    parts.push(`- **Total invested:** $${fmt(p.totalInvestment)}`);
-    parts.push(`- **Total return:** ${sign}$${fmt(p.totalReturn)} (${sign}${p.totalReturnPercent}%)`);
-
-    parts.push('');
-    parts.push(`*${result.holdingsCount} holdings analyzed*`);
-
-    return {
-      response: parts.join('\n'),
-      toolCalls,
-      sessionId
-    };
+    return { symbols: extracted, tool: null };
   }
 
   private extractSymbols(message: string): string[] {
