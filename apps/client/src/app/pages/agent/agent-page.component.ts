@@ -7,6 +7,19 @@ import {
   ElementRef,
   ViewChild
 } from '@angular/core';
+import { addIcons } from 'ionicons';
+import {
+  checkmarkCircleOutline,
+  constructOutline,
+  leafOutline,
+  personOutline,
+  pieChartOutline,
+  sendOutline,
+  sparklesOutline,
+  statsChartOutline,
+  trendingUpOutline,
+  warningOutline
+} from 'ionicons/icons';
 
 import { GfChatInputComponent } from './chat-input/chat-input.component';
 import { GfChatMessageComponent } from './chat-message/chat-message.component';
@@ -60,7 +73,20 @@ export class GfAgentPageComponent implements AfterViewChecked {
 
   private shouldScroll = false;
 
-  public constructor(private http: HttpClient) {}
+  public constructor(private http: HttpClient) {
+    addIcons({
+      checkmarkCircleOutline,
+      constructOutline,
+      leafOutline,
+      personOutline,
+      pieChartOutline,
+      sendOutline,
+      sparklesOutline,
+      statsChartOutline,
+      trendingUpOutline,
+      warningOutline
+    });
+  }
 
   public ngAfterViewChecked() {
     if (this.shouldScroll) {
