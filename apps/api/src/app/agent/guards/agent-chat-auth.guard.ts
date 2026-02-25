@@ -12,10 +12,20 @@ export class AgentChatAuthGuard extends AuthGuard('jwt') {
   }
 
   public async canActivate(context: ExecutionContext): Promise<boolean> {
+    const isDemoModeEnabled = this.configurationService.get(
+      'ENABLE_FEATURE_AGENT_CHAT_DEMO_MODE'
+    );
+
     try {
-      return (await super.canActivate(context)) as boolean;
+      const isAuthenticated = (await super.canActivate(context)) as boolean;
+
+      if (isAuthenticated) {
+        return true;
+      }
+
+      return isDemoModeEnabled;
     } catch (error) {
-      if (this.configurationService.get('ENABLE_FEATURE_AGENT_CHAT_DEMO_MODE')) {
+      if (isDemoModeEnabled) {
         return true;
       }
 
