@@ -1,0 +1,173 @@
+@switch (toolType) {
+  @case ('market-data') {
+    @for (stock of marketData; track stock.symbol) {
+      <mat-card appearance="outlined" class="tool-card market-card">
+        <mat-card-content>
+          <div class="card-header">
+            <ion-icon name="trending-up-outline" />
+            <span class="card-label">Market Data</span>
+          </div>
+
+          <div class="stock-header">
+            <div class="stock-symbol">{{ stock.symbol }}</div>
+            <div class="stock-name">{{ stock.name }}</div>
+          </div>
+
+          <div class="price-row">
+            <span class="price-value">${{ formatNumber(stock.price) }}</span>
+            @if (stock.change !== undefined) {
+              <span class="price-change" [class.positive]="(stock.change ?? 0) >= 0" [class.negative]="(stock.change ?? 0) < 0">
+                {{ (stock.change ?? 0) >= 0 ? '+' : '' }}{{ formatNumber(stock.change) }}
+                @if (stock.changePercent !== undefined) {
+                  ({{ (stock.changePercent ?? 0) >= 0 ? '+' : '' }}{{ formatNumber(stock.changePercent) }}%)
+                }
+              </span>
+            }
+          </div>
+
+          <div class="stats-grid">
+            <div class="stat">
+              <div class="stat-label">Open</div>
+              <div class="stat-value">{{ formatNumber(stock.open) }}</div>
+            </div>
+            <div class="stat">
+              <div class="stat-label">High</div>
+              <div class="stat-value">{{ formatNumber(stock.high) }}</div>
+            </div>
+            <div class="stat">
+              <div class="stat-label">Low</div>
+              <div class="stat-value">{{ formatNumber(stock.low) }}</div>
+            </div>
+            <div class="stat">
+              <div class="stat-label">Volume</div>
+              <div class="stat-value">{{ formatVolume(stock.volume) }}</div>
+            </div>
+          </div>
+
+          @if (stock.fiftyTwoWeekLow && stock.fiftyTwoWeekHigh) {
+            <div class="range-section">
+              <div class="range-label">52-Week Range</div>
+              <div class="range-bar-container">
+                <span class="range-value">{{ formatNumber(stock.fiftyTwoWeekLow, 0) }}</span>
+                <div class="range-bar">
+                  <div class="range-fill" [style.width.%]="get52WeekPercent(stock)"></div>
+                  <div class="range-marker" [style.left.%]="get52WeekPercent(stock)"></div>
+                </div>
+                <span class="range-value">{{ formatNumber(stock.fiftyTwoWeekHigh, 0) }}</span>
+              </div>
+            </div>
+          }
+        </mat-card-content>
+      </mat-card>
+    }
+  }
+
+  @case ('portfolio') {
+    @if (portfolioData) {
+      <mat-card appearance="outlined" class="tool-card portfolio-card">
+        <mat-card-content>
+          <div class="card-header">
+            <ion-icon name="pie-chart-outline" />
+            <span class="card-label">Portfolio Analysis</span>
+          </div>
+
+          <div class="portfolio-metrics">
+            @if (portfolioData.hhi !== undefined) {
+              <div class="metric-block">
+                <div class="metric-label">Concentration (HHI)</div>
+                <div class="metric-value">{{ formatNumber(portfolioData.hhi, 3) }}</div>
+                <div class="metric-sublabel" [class]="getDiversificationClass()">
+                  {{ portfolioData.diversificationLevel }}
+                </div>
+              </div>
+            }
+
+            @if (portfolioData.totalValue !== undefined) {
+              <div class="metric-block">
+                <div class="metric-label">Total Value</div>
+                <div class="metric-value">${{ formatNumber(portfolioData.totalValue) }}</div>
+              </div>
+            }
+          </div>
+
+          @if (portfolioData.topHoldings?.length) {
+            <div class="holdings-section">
+              <div class="section-label">Top Holdings</div>
+              @for (holding of portfolioData.topHoldings; track holding.name) {
+                <div class="holding-row">
+                  <span class="holding-name">{{ holding.name }}</span>
+                  <div class="holding-bar-container">
+                    <div class="holding-bar" [style.width.%]="holding.allocationInPercentage"></div>
+                  </div>
+                  <span class="holding-percent">{{ formatNumber(holding.allocationInPercentage, 1) }}%</span>
+                </div>
+              }
+            </div>
+          }
+
+          @if (portfolioData.performance?.length) {
+            <div class="performance-row">
+              @for (perf of portfolioData.performance; track perf.label) {
+                <div class="perf-item">
+                  <div class="perf-label">{{ perf.label }}</div>
+                  <div class="perf-value" [class.positive]="perf.value >= 0" [class.negative]="perf.value < 0">
+                    {{ perf.value >= 0 ? '+' : '' }}{{ formatNumber(perf.value, 1) }}%
+                  </div>
+                </div>
+              }
+            </div>
+          }
+        </mat-card-content>
+      </mat-card>
+    }
+  }
+
+  @case ('esg') {
+    @if (esgData) {
+      <mat-card appearance="outlined" class="tool-card esg-card">
+        <mat-card-content>
+          <div class="card-header">
+            <ion-icon name="leaf-outline" />
+            <span class="card-label">ESG Compliance</span>
+          </div>
+
+          <div class="esg-summary">
+            @if (esgData.compliantCount !== undefined) {
+              <div class="esg-badge compliant">
+                <ion-icon name="checkmark-circle-outline" />
+                {{ esgData.compliantCount }} compliant
+              </div>
+            }
+            @if (esgData.flaggedCount) {
+              <div class="esg-badge flagged">
+                <ion-icon name="warning-outline" />
+                {{ esgData.flaggedCount }} flagged
+              </div>
+            }
+          </div>
+
+          @if (esgData.violations?.length) {
+            <div class="violations-list">
+              @for (violation of esgData.violations; track $index) {
+                <div class="violation-item" [class]="getSeverityClass(violation.severity)">
+                  <div class="violation-header">
+                    <span class="violation-holding">{{ violation.holding }}</span>
+                    <span class="violation-severity">{{ violation.severity }}</span>
+                  </div>
+                  <div class="violation-category">{{ violation.category }}</div>
+                  @if (violation.description) {
+                    <div class="violation-description">{{ violation.description }}</div>
+                  }
+                </div>
+              }
+            </div>
+          }
+
+          @if (esgData.summary) {
+            <div class="esg-summary-text">{{ esgData.summary }}</div>
+          }
+        </mat-card-content>
+      </mat-card>
+    }
+  }
+}

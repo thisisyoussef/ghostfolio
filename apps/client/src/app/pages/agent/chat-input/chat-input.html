@@ -1,0 +1,23 @@
+<div class="chat-input-container">
+  <mat-form-field appearance="outline" class="chat-input-field">
+    <mat-label>Ask about your portfolio...</mat-label>
+    <textarea
+      matInput
+      cdkTextareaAutosize
+      [cdkAutosizeMinRows]="1"
+      [cdkAutosizeMaxRows]="5"
+      [(ngModel)]="inputMessage"
+      (keydown)="onKeyDown($event)"
+      [disabled]="isLoading"
+    ></textarea>
+  </mat-form-field>
+  <button
+    mat-flat-button
+    color="primary"
+    class="send-button"
+    (click)="send()"
+    [disabled]="isLoading || !inputMessage.trim()"
+  >
+    <ion-icon name="send-outline" />
+  </button>
+</div>

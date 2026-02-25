@@ -1,0 +1,33 @@
+:host {
+  display: block;
+  padding: 0.75rem 0;
+  border-top: 1px solid rgba(0, 0, 0, 0.12);
+
+  :host-context(.theme-dark) & {
+    border-top-color: rgba(255, 255, 255, 0.12);
+  }
+}
+
+.chat-input-container {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+}
+
+.chat-input-field {
+  flex: 1;
+
+  ::ng-deep .mat-mdc-form-field-subscript-wrapper {
+    display: none;
+  }
+}
+
+.send-button {
+  height: 56px;
+  min-width: 56px;
+  border-radius: 28px;
+
+  ion-icon {
+    font-size: 1.25rem;
+  }
+}

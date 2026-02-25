@@ -1,8 +1,18 @@
 import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
-import { Component } from '@angular/core';
-import { FormsModule } from '@angular/forms';
-import { MarkdownModule } from 'ngx-markdown';
+import {
+  AfterViewChecked,
+  Component,
+  CUSTOM_ELEMENTS_SCHEMA,
+  ElementRef,
+  ViewChild
+} from '@angular/core';
+
+import { GfChatInputComponent } from './chat-input/chat-input.component';
+import { GfChatMessageComponent } from './chat-message/chat-message.component';
+import { GfSuggestedActionsComponent } from './suggested-actions/suggested-actions.component';
+import { GfToolResultCardComponent } from './tool-result-card/tool-result-card.component';
+import { GfWelcomePanelComponent } from './welcome-panel/welcome-panel.component';
 
 interface ToolCall {
   name: string;
@@ -14,46 +24,59 @@ interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   toolCalls?: ToolCall[];
-  isError?: boolean;
-  errorType?: string;
 }
 
 interface ChatResponse {
   response: string;
   tool_calls: ToolCall[];
   session_id: string;
-  is_error?: boolean;
-  error_type?: string;
 }
 
 @Component({
   host: { class: 'page' },
-  imports: [CommonModule, FormsModule, MarkdownModule],
+  imports: [
+    CommonModule,
+    GfChatInputComponent,
+    GfChatMessageComponent,
+    GfSuggestedActionsComponent,
+    GfToolResultCardComponent,
+    GfWelcomePanelComponent
+  ],
+  schemas: [CUSTOM_ELEMENTS_SCHEMA],
   selector: 'gf-agent-page',
   styleUrls: ['./agent-page.scss'],
   templateUrl: './agent-page.html'
 })
-export class GfAgentPageComponent {
+export class GfAgentPageComponent implements AfterViewChecked {
+  @ViewChild('messagesContainer') private messagesContainer: ElementRef;
+
   public messages: ChatMessage[] = [];
-  public inputMessage = '';
   public isLoading = false;
   public sessionId = `session-${Date.now()}`;
 
+  private shouldScroll = false;
+
   public constructor(private http: HttpClient) {}
 
-  public sendMessage() {
-    const message = this.inputMessage.trim();
-    if (!message || this.isLoading) {
+  public ngAfterViewChecked() {
+    if (this.shouldScroll) {
+      this.scrollToBottom();
+      this.shouldScroll = false;
+    }
+  }
+
+  public sendMessage(message: string) {
+    if (!message.trim() || this.isLoading) {
       return;
     }
 
-    this.messages.push({ role: 'user', content: message });
-    this.inputMessage = '';
+    this.messages.push({ role: 'user', content: message.trim() });
     this.isLoading = true;
+    this.shouldScroll = true;
 
     this.http
       .post<ChatResponse>('/api/v1/agent/chat', {
-        message,
+        message: message.trim(),
         session_id: this.sessionId
       })
       .subscribe({
@@ -61,39 +84,28 @@ export class GfAgentPageComponent {
           this.messages.push({
             role: 'assistant',
             content: response.response,
-            toolCalls: response.tool_calls,
-            isError: response.is_error,
-            errorType: response.error_type
+            toolCalls: response.tool_calls
           });
           this.isLoading = false;
+          this.shouldScroll = true;
         },
         error: (error) => {
           this.messages.push({
             role: 'assistant',
-            content: `Error: ${error.message || 'Something went wrong'}`
+            content: `Error: ${error.message || 'Something went wrong. Please try again.'}`
           });
           this.isLoading = false;
+          this.shouldScroll = true;
         }
       });
   }
 
-  public onKeyDown(event: KeyboardEvent) {
-    if (event.key === 'Enter' && !event.shiftKey) {
-      event.preventDefault();
-      this.sendMessage();
-    }
-  }
-
-  public toggleToolCalls(message: ChatMessage) {
-    (message as { showToolCalls?: boolean }).showToolCalls =
-      !(message as { showToolCalls?: boolean }).showToolCalls;
-  }
-
-  public hasToolCalls(message: ChatMessage): boolean {
-    return (message.toolCalls?.length ?? 0) > 0;
-  }
-
-  public isToolCallsVisible(message: ChatMessage): boolean {
-    return (message as { showToolCalls?: boolean }).showToolCalls === true;
+  private scrollToBottom() {
+    try {
+      const el = this.messagesContainer?.nativeElement;
+      if (el) {
+        el.scrollTop = el.scrollHeight;
+      }
+    } catch {}
   }
 }

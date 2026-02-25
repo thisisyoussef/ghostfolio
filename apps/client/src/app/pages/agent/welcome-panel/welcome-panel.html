@@ -1,0 +1,36 @@
+<div class="welcome-container">
+  <div class="welcome-hero">
+    <div class="agent-avatar">
+      <ion-icon name="sparkles-outline" />
+    </div>
+    <h2 class="welcome-title">Portfolio Agent</h2>
+    <p class="welcome-subtitle">Your AI-powered financial assistant</p>
+  </div>
+
+  <mat-card appearance="outlined" class="capabilities-card">
+    <mat-card-content>
+      <div class="capabilities-label">I can help you with:</div>
+      @for (cap of capabilities; track cap.label) {
+        <div class="capability-item">
+          <ion-icon [name]="cap.icon" />
+          <span>{{ cap.label }}</span>
+        </div>
+      }
+    </mat-card-content>
+  </mat-card>
+
+  <div class="starters-section">
+    <div class="starters-label">Try asking:</div>
+    <div class="starters-grid">
+      @for (starter of starters; track starter.label) {
+        <button
+          mat-stroked-button
+          class="starter-button"
+          (click)="onStarterClick(starter.prompt)"
+        >
+          {{ starter.label }}
+        </button>
+      }
+    </div>
+  </div>
+</div>

@@ -1,0 +1,48 @@
+<div class="message-wrapper" [class.user]="role === 'user'" [class.assistant]="role === 'assistant'">
+  <div class="avatar">
+    <ion-icon [name]="role === 'user' ? 'person-outline' : 'sparkles-outline'" />
+  </div>
+
+  <mat-card [appearance]="role === 'assistant' ? 'outlined' : undefined" class="message-card">
+    <mat-card-content>
+      <div class="message-role">{{ role === 'user' ? 'You' : 'Agent' }}</div>
+
+      @if (role === 'assistant') {
+        <div class="message-content">
+          <markdown [data]="content"></markdown>
+        </div>
+      } @else {
+        <div class="message-content user-text">{{ content }}</div>
+      }
+
+      @if (hasToolCalls) {
+        @for (tc of toolCalls; track $index) {
+          <gf-tool-result-card [toolCall]="tc" />
+        }
+
+        <button
+          mat-stroked-button
+          class="tool-calls-toggle"
+          (click)="toggleToolCalls()"
+        >
+          <ion-icon [name]="showToolCalls ? 'chevron-up-outline' : 'chevron-down-outline'" />
+          {{ showToolCalls ? 'Hide' : 'Show' }} raw data ({{ toolCalls?.length }})
+        </button>
+
+        @if (showToolCalls) {
+          <div class="tool-calls">
+            @for (tc of toolCalls; track $index) {
+              <div class="tool-call">
+                <div class="tool-name">
+                  <ion-icon name="construct-outline" />
+                  {{ tc.name }}
+                </div>
+                <pre class="tool-result">{{ tc.result }}</pre>
+              </div>
+            }
+          </div>
+        }
+      }
+    </mat-card-content>
+  </mat-card>
+</div>

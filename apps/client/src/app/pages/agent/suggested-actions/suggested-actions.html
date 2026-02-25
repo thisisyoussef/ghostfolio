@@ -1,0 +1,12 @@
+<div class="suggested-actions-container">
+  @for (action of suggestions; track action.label; let i = $index) {
+    <button
+      class="suggestion-chip"
+      [style.animation-delay.ms]="i * 50"
+      (click)="onChipClick(action)"
+    >
+      <ion-icon [name]="action.icon" />
+      <span>{{ action.label }}</span>
+    </button>
+  }
+</div>

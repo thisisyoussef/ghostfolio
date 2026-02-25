@@ -473,7 +473,7 @@ export class AgentService {
   }
 
   private extractSymbols(message: string): string[] {
-    const symbolPattern = /\b([A-Z]{1,5})\b/g;
+    const symbolPattern = /\b([A-Z]{1,12})\b/g;
     const potentialSymbols = message.match(symbolPattern) || [];
     const commonWords = new Set([
       'I',

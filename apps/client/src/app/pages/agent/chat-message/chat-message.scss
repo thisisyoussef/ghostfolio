@@ -1,0 +1,147 @@
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+:host {
+  display: block;
+  animation: slideIn 0.2s ease-out;
+}
+
+.message-wrapper {
+  display: flex;
+  gap: 0.5rem;
+  max-width: 85%;
+
+  &.user {
+    flex-direction: row-reverse;
+    margin-left: auto;
+  }
+
+  &.assistant {
+    margin-right: auto;
+  }
+}
+
+.avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 1rem;
+
+  .user & {
+    background: rgba(var(--palette-primary-500, 54, 207, 204), 0.15);
+    color: rgb(var(--palette-primary-500, 54, 207, 204));
+  }
+
+  .assistant & {
+    background: rgba(var(--palette-secondary-500, 54, 134, 207), 0.15);
+    color: rgb(var(--palette-secondary-500, 54, 134, 207));
+  }
+}
+
+.message-card {
+  .user & {
+    background: rgb(var(--palette-primary-500, 54, 207, 204));
+    color: rgba(var(--dark-primary-text, 0, 0, 0), 0.87);
+    border: none;
+  }
+}
+
+.message-role {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  margin-bottom: 0.25rem;
+  opacity: 0.6;
+}
+
+.message-content {
+  word-break: break-word;
+
+  &.user-text {
+    white-space: pre-wrap;
+  }
+
+  markdown {
+    display: block;
+
+    ::ng-deep {
+      p {
+        margin: 0.25rem 0;
+
+        &:first-child { margin-top: 0; }
+        &:last-child { margin-bottom: 0; }
+      }
+
+      strong { font-weight: 600; }
+      em { font-style: italic; opacity: 0.8; }
+
+      ul, ol {
+        margin: 0.25rem 0;
+        padding-left: 1.25rem;
+      }
+
+      li { margin: 0.15rem 0; }
+
+      h1, h2, h3 {
+        margin: 0.5rem 0 0.25rem;
+        font-size: 1rem;
+        font-weight: 600;
+      }
+    }
+  }
+}
+
+.tool-calls-toggle {
+  margin-top: 0.75rem;
+  font-size: 0.75rem;
+
+  ion-icon {
+    margin-right: 0.25rem;
+    font-size: 0.875rem;
+  }
+}
+
+.tool-calls {
+  margin-top: 0.5rem;
+}
+
+.tool-call {
+  background: rgba(0, 0, 0, 0.04);
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+  margin-top: 0.25rem;
+
+  :host-context(.theme-dark) & {
+    background: rgba(255, 255, 255, 0.04);
+  }
+}
+
+.tool-name {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: rgb(var(--palette-primary-500, 54, 207, 204));
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.tool-result {
+  font-size: 0.7rem;
+  margin: 0.25rem 0 0;
+  overflow-x: auto;
+  max-height: 200px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+}

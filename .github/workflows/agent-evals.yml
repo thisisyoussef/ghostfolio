@@ -1,0 +1,83 @@
+name: Agent Evals
+
+on:
+  push:
+    paths:
+      - 'apps/api/src/app/agent/**'
+      - '.github/workflows/agent-evals.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  EVAL_BASE_URL: https://ghostfolio-production-e8d1.up.railway.app
+
+jobs:
+  # ── Tier 0: Unit tests (fast, no network) ──────────────────────────────────
+  unit-tests:
+    name: 'Tier 0: Unit & Behavioral Tests'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run agent tests (152 tests)
+        run: npx dotenv-cli -e .env.example -- npx nx test api --testPathPatterns="app/agent/" --no-coverage
+
+  # ── Tier 1: Deterministic eval against production ──────────────────────────
+  tier1-eval:
+    name: 'Tier 1: Deterministic Eval (prod)'
+    needs: unit-tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Tier 1 eval against production
+        env:
+          EVAL_ACCESS_TOKEN: ${{ secrets.EVAL_ACCESS_TOKEN }}
+        run: npx tsx apps/api/src/app/agent/evals/eval-runner.ts
+
+  # ── Tier 2: LangSmith eval (dashboard + tracing) ──────────────────────────
+  tier2-langsmith:
+    name: 'Tier 2: LangSmith Eval (prod)'
+    needs: unit-tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Tier 2 eval against production
+        env:
+          EVAL_ACCESS_TOKEN: ${{ secrets.EVAL_ACCESS_TOKEN }}
+          LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
+          LANGSMITH_TRACING: 'true'
+        run: npx tsx apps/api/src/app/agent/evals/eval-runner-langsmith.ts
