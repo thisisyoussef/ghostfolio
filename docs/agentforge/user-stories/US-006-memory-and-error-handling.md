@@ -311,12 +311,14 @@ npx nx build client
 
 ## Checkpoint Result
 
-_(Fill after deployment.)_
-
-- Commit SHA:
-- Ghostfolio URL:
-- User Validation: `passed | failed | blocked`
+- Commit SHA: `961d8f606` through `8bdbab5b2` (12 commits)
+- Ghostfolio URL: https://ghostfolio-production-e8d1.up.railway.app/agent
+- User Validation: `in-review`
 - Notes:
+  - All 13 agent test suites pass (168 tests)
+  - Pre-existing `keyv`/`redis-cache` build errors are unrelated to agent code
+  - UI redesign (976f8cf) was unplanned but kept; error fields re-applied (1be2755a3)
+  - Railway deployment triggered via push to main
 
 ## Observability & Monitoring
 
