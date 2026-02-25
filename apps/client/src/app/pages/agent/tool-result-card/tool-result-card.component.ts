@@ -84,12 +84,21 @@ export class GfToolResultCardComponent implements OnChanges {
   }
 
   public get52WeekPercent(stock: MarketDataResult): number {
-    if (!stock.fiftyTwoWeekLow || !stock.fiftyTwoWeekHigh || !stock.price) {
+    if (
+      stock.fiftyTwoWeekLow === undefined ||
+      stock.fiftyTwoWeekHigh === undefined ||
+      stock.price === undefined
+    ) {
       return 50;
     }
     const range = stock.fiftyTwoWeekHigh - stock.fiftyTwoWeekLow;
-    if (range === 0) return 50;
-    return ((stock.price - stock.fiftyTwoWeekLow) / range) * 100;
+    if (range === 0) {
+      return 50;
+    }
+    return Math.max(
+      0,
+      Math.min(100, ((stock.price - stock.fiftyTwoWeekLow) / range) * 100)
+    );
   }
 
   public formatNumber(value: number | undefined, decimals = 2): string {
@@ -101,7 +110,7 @@ export class GfToolResultCardComponent implements OnChanges {
   }
 
   public formatVolume(volume: number | undefined): string {
-    if (!volume) return '—';
+    if (volume === undefined || volume === null) return '—';
     if (volume >= 1_000_000_000) return `${(volume / 1_000_000_000).toFixed(1)}B`;
     if (volume >= 1_000_000) return `${(volume / 1_000_000).toFixed(1)}M`;
     if (volume >= 1_000) return `${(volume / 1_000).toFixed(1)}K`;
@@ -126,6 +135,12 @@ export class GfToolResultCardComponent implements OnChanges {
   }
 
   private parseToolResult() {
+    this.parseError = false;
+    this.toolType = 'unknown';
+    this.marketData = [];
+    this.portfolioData = null;
+    this.esgData = null;
+
     try {
       const parsed = JSON.parse(this.toolCall.result);
 
@@ -154,22 +169,127 @@ export class GfToolResultCardComponent implements OnChanges {
     }
   }
 
-  private parseMarketData(data: any): MarketDataResult[] {
-    const stocks = Array.isArray(data) ? data : data?.quotes || data?.results || [data];
-    return stocks.map((s: any) => ({
-      symbol: s.symbol || s.ticker || '—',
-      name: s.name || s.shortName || s.longName || '',
-      price: s.price ?? s.regularMarketPrice ?? s.currentPrice,
-      change: s.change ?? s.regularMarketChange,
-      changePercent: s.changePercent ?? s.regularMarketChangePercent,
-      open: s.open ?? s.regularMarketOpen,
-      high: s.high ?? s.regularMarketDayHigh,
-      low: s.low ?? s.regularMarketDayLow,
-      volume: s.volume ?? s.regularMarketVolume,
-      fiftyTwoWeekLow: s.fiftyTwoWeekLow,
-      fiftyTwoWeekHigh: s.fiftyTwoWeekHigh,
-      currency: s.currency || 'USD'
-    }));
+  private parseMarketData(data: unknown): MarketDataResult[] {
+    return this.normalizeMarketDataStocks(data).map(({ stock, symbolHint }) => {
+      const symbol = this.firstString(stock.symbol, stock.ticker, symbolHint) || '—';
+
+      return {
+        symbol,
+        name: this.firstString(
+          stock.name,
+          stock.shortName,
+          stock.longName,
+          stock.displayName
+        ) || '',
+        price: this.firstNumber(
+          stock.price,
+          stock.regularMarketPrice,
+          stock.currentPrice,
+          stock.lastPrice,
+          stock.close
+        ),
+        change: this.firstNumber(stock.change, stock.regularMarketChange),
+        changePercent: this.firstNumber(
+          stock.changePercent,
+          stock.regularMarketChangePercent
+        ),
+        open: this.firstNumber(stock.open, stock.regularMarketOpen),
+        high: this.firstNumber(
+          stock.high,
+          stock.regularMarketDayHigh,
+          stock.dayHigh
+        ),
+        low: this.firstNumber(stock.low, stock.regularMarketDayLow, stock.dayLow),
+        volume: this.firstNumber(stock.volume, stock.regularMarketVolume),
+        fiftyTwoWeekLow: this.firstNumber(stock.fiftyTwoWeekLow, stock['52WeekLow']),
+        fiftyTwoWeekHigh: this.firstNumber(
+          stock.fiftyTwoWeekHigh,
+          stock['52WeekHigh']
+        ),
+        currency: this.firstString(stock.currency, stock.financialCurrency) || 'USD'
+      };
+    });
+  }
+
+  private normalizeMarketDataStocks(
+    data: unknown
+  ): Array<{ stock: Record<string, unknown>; symbolHint?: string }> {
+    if (Array.isArray(data)) {
+      return data
+        .filter((stock): stock is Record<string, unknown> => this.isRecord(stock))
+        .map((stock) => ({ stock }));
+    }
+
+    if (!this.isRecord(data)) {
+      return [];
+    }
+
+    const collectionCandidates = [data.quotes, data.results, data.data];
+    for (const candidate of collectionCandidates) {
+      if (Array.isArray(candidate)) {
+        return candidate
+          .filter((stock): stock is Record<string, unknown> => this.isRecord(stock))
+          .map((stock) => ({ stock }));
+      }
+    }
+
+    const isSingleStockShape = [
+      'symbol',
+      'ticker',
+      'price',
+      'regularMarketPrice',
+      'currentPrice',
+      'fiftyTwoWeekHigh',
+      'fiftyTwoWeekLow'
+    ].some((key) => data[key] !== undefined);
+
+    if (isSingleStockShape) {
+      return [{ stock: data }];
+    }
+
+    const keyedStocks = Object.entries(data).flatMap(([symbolKey, value]) => {
+      if (!this.isRecord(value)) {
+        return [];
+      }
+      return [{ stock: value, symbolHint: symbolKey }];
+    });
+
+    if (keyedStocks.length > 0) {
+      return keyedStocks;
+    }
+
+    return [{ stock: data }];
+  }
+
+  private firstNumber(...values: unknown[]): number | undefined {
+    for (const value of values) {
+      if (typeof value === 'number' && Number.isFinite(value)) {
+        return value;
+      }
+      if (typeof value === 'string' && value.trim() !== '') {
+        const parsed = Number(value);
+        if (Number.isFinite(parsed)) {
+          return parsed;
+        }
+      }
+    }
+    return undefined;
+  }
+
+  private firstString(...values: unknown[]): string | undefined {
+    for (const value of values) {
+      if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (trimmed) {
+          return trimmed;
+        }
+      }
+    }
+    return undefined;
+  }
+
+  private isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
   }
 
   private parsePortfolioData(data: any): PortfolioRiskResult {

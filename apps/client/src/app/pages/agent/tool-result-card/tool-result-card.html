@@ -25,26 +25,36 @@
             }
           </div>
 
-          <div class="stats-grid">
-            <div class="stat">
-              <div class="stat-label">Open</div>
-              <div class="stat-value">{{ formatNumber(stock.open) }}</div>
+          @if (stock.open !== undefined || stock.high !== undefined || stock.low !== undefined || stock.volume !== undefined) {
+            <div class="stats-grid">
+              @if (stock.open !== undefined) {
+                <div class="stat">
+                  <div class="stat-label">Open</div>
+                  <div class="stat-value">{{ formatNumber(stock.open) }}</div>
+                </div>
+              }
+              @if (stock.high !== undefined) {
+                <div class="stat">
+                  <div class="stat-label">High</div>
+                  <div class="stat-value">{{ formatNumber(stock.high) }}</div>
+                </div>
+              }
+              @if (stock.low !== undefined) {
+                <div class="stat">
+                  <div class="stat-label">Low</div>
+                  <div class="stat-value">{{ formatNumber(stock.low) }}</div>
+                </div>
+              }
+              @if (stock.volume !== undefined) {
+                <div class="stat">
+                  <div class="stat-label">Volume</div>
+                  <div class="stat-value">{{ formatVolume(stock.volume) }}</div>
+                </div>
+              }
             </div>
-            <div class="stat">
-              <div class="stat-label">High</div>
-              <div class="stat-value">{{ formatNumber(stock.high) }}</div>
-            </div>
-            <div class="stat">
-              <div class="stat-label">Low</div>
-              <div class="stat-value">{{ formatNumber(stock.low) }}</div>
-            </div>
-            <div class="stat">
-              <div class="stat-label">Volume</div>
-              <div class="stat-value">{{ formatVolume(stock.volume) }}</div>
-            </div>
-          </div>
+          }
 
-          @if (stock.fiftyTwoWeekLow && stock.fiftyTwoWeekHigh) {
+          @if (stock.fiftyTwoWeekLow !== undefined && stock.fiftyTwoWeekHigh !== undefined) {
             <div class="range-section">
               <div class="range-label">52-Week Range</div>
               <div class="range-bar-container">
