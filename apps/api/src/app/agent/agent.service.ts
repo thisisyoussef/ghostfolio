@@ -1,12 +1,17 @@
 import { PortfolioService } from '@ghostfolio/api/app/portfolio/portfolio.service';
 
 import { Injectable } from '@nestjs/common';
+import { traceable } from 'langsmith/traceable';
 
 import { AgentError, ErrorType } from './errors/agent-error';
 import { SessionMemoryService } from './memory/session-memory.service';
 import { complianceCheck } from './tools/compliance-checker.tool';
 import { marketDataFetch } from './tools/market-data.tool';
 import { portfolioRiskAnalysis } from './tools/portfolio-analysis.tool';
+import { ensureLangSmithEnv } from './tracing/langsmith.config';
+
+// Initialize LangSmith env defaults at module load time
+ensureLangSmithEnv();
 
 interface ToolCallInfo {
   name: string;
@@ -108,6 +113,27 @@ export class AgentService {
     sessionId: string;
     userId: string;
   }): Promise<ChatResponse> {
+    // Wrap the entire chat flow in a traceable span so every request
+    // appears in the LangSmith Tracing tab under the ghostfolio-agent project
+    const traceableChat = traceable(
+      async (params: {
+        message: string;
+        sessionId: string;
+        userId: string;
+      }): Promise<ChatResponse> => {
+        return this._chatImpl(params);
+      },
+      { name: 'agent_chat', run_type: 'chain' }
+    );
+
+    return traceableChat(input);
+  }
+
+  private async _chatImpl(input: {
+    message: string;
+    sessionId: string;
+    userId: string;
+  }): Promise<ChatResponse> {
     const { message, sessionId, userId } = input;
 
     if (!message.trim()) {
@@ -145,7 +171,30 @@ export class AgentService {
       };
     }
 
-    // Fetch market data with error handling
+    // Fetch market data — wrapped in a traceable tool span
+    return this.handleMarketDataQuestion(symbols, sessionId);
+  }
+
+  private async handleMarketDataQuestion(
+    symbols: string[],
+    sessionId: string
+  ): Promise<ChatResponse> {
+    const traceableMarketData = traceable(
+      async (params: {
+        symbols: string[];
+      }): Promise<ChatResponse> => {
+        return this._marketDataImpl(params.symbols, sessionId);
+      },
+      { name: 'market_data_fetch', run_type: 'tool' }
+    );
+
+    return traceableMarketData({ symbols });
+  }
+
+  private async _marketDataImpl(
+    symbols: string[],
+    sessionId: string
+  ): Promise<ChatResponse> {
     try {
       const marketData = await marketDataFetch({ symbols });
       const toolCalls: ToolCallInfo[] = [
@@ -232,6 +281,29 @@ export class AgentService {
   }
 
   private async handleComplianceQuestion(
+    message: string,
+    sessionId: string,
+    userId: string
+  ): Promise<ChatResponse> {
+    const traceableCompliance = traceable(
+      async (params: {
+        message: string;
+        sessionId: string;
+        userId: string;
+      }): Promise<ChatResponse> => {
+        return this._complianceImpl(
+          params.message,
+          params.sessionId,
+          params.userId
+        );
+      },
+      { name: 'compliance_check', run_type: 'tool' }
+    );
+
+    return traceableCompliance({ message, sessionId, userId });
+  }
+
+  private async _complianceImpl(
     message: string,
     sessionId: string,
     userId: string
@@ -343,6 +415,29 @@ export class AgentService {
   }
 
   private async handlePortfolioQuestion(
+    message: string,
+    sessionId: string,
+    userId: string
+  ): Promise<ChatResponse> {
+    const traceablePortfolio = traceable(
+      async (params: {
+        message: string;
+        sessionId: string;
+        userId: string;
+      }): Promise<ChatResponse> => {
+        return this._portfolioImpl(
+          params.message,
+          params.sessionId,
+          params.userId
+        );
+      },
+      { name: 'portfolio_risk_analysis', run_type: 'tool' }
+    );
+
+    return traceablePortfolio({ message, sessionId, userId });
+  }
+
+  private async _portfolioImpl(
     message: string,
     sessionId: string,
     userId: string

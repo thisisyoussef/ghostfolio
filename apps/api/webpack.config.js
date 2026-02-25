@@ -7,6 +7,10 @@ module.exports = composePlugins(withNx(), (config, { options, context }) => {
   config.externals = config.externals || [];
   if (Array.isArray(config.externals)) {
     config.externals.push('yahoo-finance2');
+    // langsmith uses dynamic imports and AsyncLocalStorage for tracing context
+    // propagation — must be resolved from node_modules at runtime.
+    config.externals.push('langsmith');
+    config.externals.push('langsmith/traceable');
   }
   return config;
 });
