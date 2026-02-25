@@ -27,6 +27,8 @@ export class GfChatMessageComponent {
   @Input() role: 'user' | 'assistant' = 'assistant';
   @Input() content = '';
   @Input() toolCalls?: ToolCall[];
+  @Input() isError = false;
+  @Input() errorType = '';
 
   public showToolCalls = false;
 

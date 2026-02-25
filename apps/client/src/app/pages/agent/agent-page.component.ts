@@ -24,12 +24,16 @@ interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   toolCalls?: ToolCall[];
+  isError?: boolean;
+  errorType?: string;
 }
 
 interface ChatResponse {
   response: string;
   tool_calls: ToolCall[];
   session_id: string;
+  is_error?: boolean;
+  error_type?: string;
 }
 
 @Component({
@@ -84,7 +88,9 @@ export class GfAgentPageComponent implements AfterViewChecked {
           this.messages.push({
             role: 'assistant',
             content: response.response,
-            toolCalls: response.tool_calls
+            toolCalls: response.tool_calls,
+            isError: response.is_error,
+            errorType: response.error_type
           });
           this.isLoading = false;
           this.shouldScroll = true;

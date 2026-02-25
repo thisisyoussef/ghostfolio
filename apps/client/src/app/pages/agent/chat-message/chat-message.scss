@@ -48,6 +48,11 @@
     background: rgba(var(--palette-secondary-500, 54, 134, 207), 0.15);
     color: rgb(var(--palette-secondary-500, 54, 134, 207));
   }
+
+  .error & {
+    background: rgba(244, 67, 54, 0.15);
+    color: #f44336;
+  }
 }
 
 .message-card {
@@ -55,6 +60,11 @@
     background: rgb(var(--palette-primary-500, 54, 207, 204));
     color: rgba(var(--dark-primary-text, 0, 0, 0), 0.87);
     border: none;
+  }
+
+  .error & {
+    border-left: 3px solid #f44336;
+    background: rgba(244, 67, 54, 0.05);
   }
 }
 
