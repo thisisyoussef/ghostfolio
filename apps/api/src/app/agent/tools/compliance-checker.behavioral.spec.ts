@@ -17,6 +17,7 @@ jest.mock('@ghostfolio/api/app/portfolio/portfolio.service', () => ({
 import { PortfolioService } from '@ghostfolio/api/app/portfolio/portfolio.service';
 
 import { AgentService, ChatResponse } from '../agent.service';
+import { SessionMemoryService } from '../memory/session-memory.service';
 import {
   TestPortfolioService,
   FailingPortfolioService,
@@ -34,7 +35,10 @@ describe('ESG Compliance — Behavioral Tests (Layer 3)', () => {
   let service: AgentService;
 
   function buildService(portfolioService: any): AgentService {
-    return new AgentService(portfolioService as PortfolioService);
+    return new AgentService(
+      portfolioService as PortfolioService,
+      new SessionMemoryService()
+    );
   }
 
   beforeEach(() => {

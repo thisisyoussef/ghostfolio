@@ -19,6 +19,7 @@ jest.mock('./tools/market-data.tool', () => ({
 import { AgentService } from './agent.service';
 import { PortfolioService } from '@ghostfolio/api/app/portfolio/portfolio.service';
 import { marketDataFetch } from './tools/market-data.tool';
+import { SessionMemoryService } from './memory/session-memory.service';
 import {
   TestPortfolioService,
   FailingPortfolioService,
@@ -38,7 +39,8 @@ describe('AgentService — Behavioral Tests (Layer 3)', () => {
     jest.clearAllMocks();
     const testPortfolioService = new TestPortfolioService(makeTestHoldings());
     service = new AgentService(
-      testPortfolioService as unknown as PortfolioService
+      testPortfolioService as unknown as PortfolioService,
+      new SessionMemoryService()
     );
   });
 
@@ -131,7 +133,8 @@ describe('AgentService — Behavioral Tests (Layer 3)', () => {
 
   it('should return user-friendly message when portfolio service fails', async () => {
     const failService = new AgentService(
-      new FailingPortfolioService() as unknown as PortfolioService
+      new FailingPortfolioService() as unknown as PortfolioService,
+      new SessionMemoryService()
     );
 
     const result = await failService.chat({
@@ -188,6 +191,36 @@ describe('AgentService — Behavioral Tests (Layer 3)', () => {
     });
 
     expect(result.sessionId).toBe(uniqueSession);
+  });
+
+  // === Invalid Symbol Handling (gs-004) ===
+
+  it('should route long invalid symbols like XYZNOTREAL to market_data_fetch instead of fallback', async () => {
+    mockedMarketDataFetch.mockResolvedValue({
+      XYZNOTREAL: {
+        symbol: 'XYZNOTREAL',
+        error: 'No data returned for XYZNOTREAL'
+      }
+    });
+
+    const result = await service.chat({
+      message: 'Get me the price of XYZNOTREAL',
+      sessionId: TEST_SESSION,
+      userId: TEST_USER_ID
+    });
+
+    // Tool must be called (not dropped by regex)
+    expect(result.toolCalls).toHaveLength(1);
+    expect(result.toolCalls[0].name).toBe('market_data_fetch');
+    expect(mockedMarketDataFetch).toHaveBeenCalledWith({
+      symbols: ['XYZNOTREAL']
+    });
+
+    // Response must mention the symbol
+    expect(result.response).toContain('XYZNOTREAL');
+
+    // Response must NOT be the generic fallback
+    expect(result.response).not.toContain('I can help you with');
   });
 
   // === ESG Category Filter Detection ===
