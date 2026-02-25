@@ -117,6 +117,17 @@ const COMMON_SYMBOL_FALSE_POSITIVES = new Set([
   'WHAT'
 ]);
 
+type ContinuationIntent = 'combined' | 'compliance' | 'portfolio';
+
+const CONTINUATION_PROMPTS: Record<ContinuationIntent, string> = {
+  combined:
+    'Show my overall portfolio risk level with rebalancing suggestions, and run ESG analysis with impact ranking plus score change if all flagged offenders are removed.',
+  compliance:
+    'Which flagged holdings have the biggest ESG impact, and what would my score be if all flagged offenders were removed?',
+  portfolio:
+    'What is my overall portfolio risk level, and what rebalancing suggestions should I consider?'
+};
+
 export function isEsgQuestion(message: string): boolean {
   const lower = message.toLowerCase();
   return ESG_KEYWORDS.some((keyword) => lower.includes(keyword));
@@ -234,6 +245,34 @@ export class DeterministicAgentService {
 
     if (isPortfolio) {
       return this.handlePortfolioQuestion(message, sessionId, userId);
+    }
+
+    const continuationIntent = await this.resolveContinuationIntent(
+      message,
+      sessionId,
+      userId
+    );
+
+    if (continuationIntent) {
+      const continuationMessage = CONTINUATION_PROMPTS[continuationIntent];
+
+      if (continuationIntent === 'combined') {
+        return this.handleCombinedRiskAndComplianceQuestion(
+          continuationMessage,
+          sessionId,
+          userId
+        );
+      }
+
+      if (continuationIntent === 'compliance') {
+        return this.handleComplianceQuestion(
+          continuationMessage,
+          sessionId,
+          userId
+        );
+      }
+
+      return this.handlePortfolioQuestion(continuationMessage, sessionId, userId);
     }
 
     const context = await this.resolveContext(message, sessionId, userId);
@@ -603,6 +642,37 @@ export class DeterministicAgentService {
       parts.push('');
       parts.push(`*${result.holdingsCount} holdings analyzed*`);
 
+      if (this.shouldIncludeRebalancingGuidance(message)) {
+        const topHolding = concentration.topHoldings[0];
+        const secondHolding = concentration.topHoldings[1];
+
+        parts.push('');
+        parts.push('### 🧭 Rebalancing Suggestions');
+        parts.push('');
+
+        if (topHolding) {
+          parts.push(
+            `- Consider trimming **${topHolding.symbol}** closer to 15% to reduce single-position concentration risk.`
+          );
+        }
+
+        if (topHolding && secondHolding) {
+          const combinedTopTwo = roundTwo(
+            topHolding.percentage + secondHolding.percentage
+          );
+          parts.push(
+            `- Keep your top 2 holdings near or below ~35% combined (currently about ${combinedTopTwo}%).`
+          );
+        }
+
+        parts.push(
+          '- Reallocate gradual reductions into broader diversified funds to smooth concentration risk.'
+        );
+        parts.push(
+          '- If ESG alignment matters, prioritize reducing high-severity offenders first before adding new exposure.'
+        );
+      }
+
       return {
         response: parts.join('\n'),
         sessionId,
@@ -681,6 +751,94 @@ export class DeterministicAgentService {
       (symbol) =>
         !COMMON_SYMBOL_FALSE_POSITIVES.has(symbol) && symbol.length >= 2
     );
+  }
+
+  private isShortAffirmation(message: string): boolean {
+    const normalized = message.trim().toLowerCase();
+    const patterns = [
+      /^(yes|yeah|yep|sure|ok|okay|please do|go ahead)$/i,
+      /^(both|both please|both of the above|all of the above|do both)$/i
+    ];
+
+    return (
+      normalized.length > 0 &&
+      normalized.length <= 40 &&
+      patterns.some((pattern) => pattern.test(normalized))
+    );
+  }
+
+  private async resolveContinuationIntent(
+    message: string,
+    sessionId: string,
+    userId: string
+  ): Promise<ContinuationIntent | null> {
+    if (!this.isShortAffirmation(message)) {
+      return null;
+    }
+
+    const context = await this.sessionMemory.getConversationContext(
+      userId,
+      sessionId
+    );
+
+    if (context.recentMessages.length === 0) {
+      return null;
+    }
+
+    const normalized = message.trim().toLowerCase();
+    const wantsBoth =
+      /\bboth\b/.test(normalized) || /all of the above/.test(normalized);
+
+    const recentMessages = [...context.recentMessages];
+    const lastAssistant = recentMessages
+      .slice()
+      .reverse()
+      .find((entry) => entry.role === 'assistant');
+    const assistantText = (lastAssistant?.content || '').toLowerCase();
+
+    const assistantMentionsEsg =
+      /(esg|offender|compliance|score)/.test(assistantText);
+    const assistantMentionsRisk =
+      /(risk|rebalanc|portfolio|concentration)/.test(assistantText);
+    const assistantAskedChoice =
+      /(did you mean|both of the above|would you like|choose|clarification)/.test(
+        assistantText
+      );
+
+    if (assistantAskedChoice && assistantMentionsEsg && assistantMentionsRisk) {
+      if (wantsBoth || this.isShortAffirmation(message)) {
+        return 'combined';
+      }
+    }
+
+    const recentUserMessages = recentMessages
+      .filter((entry) => entry.role === 'user')
+      .slice(-3)
+      .map((entry) => entry.content.toLowerCase());
+
+    if (
+      recentUserMessages.some((entry) => {
+        return isEsgQuestion(entry) && isRiskIntentQuestion(entry);
+      })
+    ) {
+      return 'combined';
+    }
+
+    if (assistantMentionsEsg && wantsBoth) {
+      return assistantMentionsRisk ? 'combined' : 'compliance';
+    }
+
+    if (assistantMentionsRisk && wantsBoth) {
+      return 'combined';
+    }
+
+    return null;
+  }
+
+  private shouldIncludeRebalancingGuidance(message: string): boolean {
+    const lower = message.toLowerCase();
+
+    return /(rebalanc|redistribut|rebalance|suggestion|optimi[sz]e)/.test(lower);
   }
 
   private buildComplianceResponseParts(

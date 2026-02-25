@@ -403,4 +403,53 @@ describe('AgentService — Behavioral Tests (Layer 3)', () => {
     expect(result.response).toContain('Deterministic fallback response.');
     expect(result.response).toContain('deterministic fallback mode');
   });
+
+  it('should handle short "both" follow-up via deterministic fallback without resetting context', async () => {
+    process.env.ENABLE_FEATURE_AGENT_LANGGRAPH = 'true';
+
+    const fallbackMemory = new SessionMemoryService();
+    const fallbackService = new AgentService(
+      new TestPortfolioService(makeTestHoldings()) as unknown as PortfolioService,
+      fallbackMemory
+    );
+
+    await fallbackMemory.appendMessages(TEST_USER_ID, TEST_SESSION, [
+      {
+        content: 'How risky am I and is it ESG compliant?',
+        createdAt: Date.now() - 2_000,
+        role: 'user'
+      },
+      {
+        content:
+          'I need a quick clarification — did you mean ESG impact, rebalancing suggestions, or both of the above?',
+        createdAt: Date.now() - 1_000,
+        role: 'assistant'
+      }
+    ]);
+
+    const graphChat = jest
+      .fn()
+      .mockRejectedValue(
+        new AgentError(
+          ErrorType.MODEL,
+          'Model timed out after 12000ms.',
+          true
+        )
+      );
+
+    (fallbackService as any).graphAgent = { chat: graphChat };
+
+    const result = await fallbackService.chat({
+      message: 'both',
+      sessionId: TEST_SESSION,
+      userId: TEST_USER_ID
+    });
+
+    expect(result.toolCalls.map((toolCall) => toolCall.name)).toEqual([
+      'portfolio_risk_analysis',
+      'compliance_check'
+    ]);
+    expect(result.response).not.toContain('I can help you with');
+    expect(result.response).toContain('deterministic fallback mode');
+  });
 });

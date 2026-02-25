@@ -26,13 +26,15 @@ describe('DeterministicAgentService', () => {
   const TEST_SESSION = 'session-1';
 
   let service: DeterministicAgentService;
+  let sessionMemory: SessionMemoryService;
 
   beforeEach(() => {
     jest.clearAllMocks();
+    sessionMemory = new SessionMemoryService();
 
     service = new DeterministicAgentService(
       new TestPortfolioService(makeTestHoldings()) as unknown as PortfolioService,
-      new SessionMemoryService()
+      sessionMemory
     );
   });
 
@@ -116,6 +118,35 @@ describe('DeterministicAgentService', () => {
     expect(response.toolCalls[0].name).toBe('compliance_check');
     expect(response.response).toContain('Hypothetical Scenario');
     expect(response.response).toContain('estimated compliance score would be');
+  });
+
+  it('should resolve short "both" follow-up using recent clarification context', async () => {
+    await sessionMemory.appendMessages(TEST_USER, TEST_SESSION, [
+      {
+        content: 'How risky am I and is it ESG compliant?',
+        createdAt: Date.now() - 2_000,
+        role: 'user'
+      },
+      {
+        content:
+          'I need a quick clarification — did you mean ESG impact, rebalancing suggestions, or both of the above?',
+        createdAt: Date.now() - 1_000,
+        role: 'assistant'
+      }
+    ]);
+
+    const response = await service.chat({
+      message: 'both',
+      sessionId: TEST_SESSION,
+      userId: TEST_USER
+    });
+
+    expect(response.toolCalls.map((toolCall) => toolCall.name)).toEqual([
+      'portfolio_risk_analysis',
+      'compliance_check'
+    ]);
+    expect(response.response).not.toContain('I can help you with');
+    expect(response.response).toContain('Rebalancing Suggestions');
   });
 
   it('should return help text for out-of-scope question', async () => {
