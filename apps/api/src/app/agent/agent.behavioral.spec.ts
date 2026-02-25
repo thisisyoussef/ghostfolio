@@ -17,6 +17,7 @@ jest.mock('./tools/market-data.tool', () => ({
 }));
 
 import { AgentService } from './agent.service';
+import { AgentError, ErrorType } from './errors/agent-error';
 import { PortfolioService } from '@ghostfolio/api/app/portfolio/portfolio.service';
 import { marketDataFetch } from './tools/market-data.tool';
 import { SessionMemoryService } from './memory/session-memory.service';
@@ -37,11 +38,16 @@ describe('AgentService — Behavioral Tests (Layer 3)', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    process.env.ENABLE_FEATURE_AGENT_LANGGRAPH = 'false';
     const testPortfolioService = new TestPortfolioService(makeTestHoldings());
     service = new AgentService(
       testPortfolioService as unknown as PortfolioService,
       new SessionMemoryService()
     );
+  });
+
+  afterEach(() => {
+    process.env.ENABLE_FEATURE_AGENT_LANGGRAPH = 'false';
   });
 
   // === Tool Routing Accuracy ===
@@ -239,5 +245,129 @@ describe('AgentService — Behavioral Tests (Layer 3)', () => {
     // Should filter to fossil_fuels category
     const toolArgs = result.toolCalls[0].args;
     expect(toolArgs.filterCategory).toBe('fossil_fuels');
+  });
+
+  it('should support multi-step tool chain in one turn when graph mode is enabled', async () => {
+    process.env.ENABLE_FEATURE_AGENT_LANGGRAPH = 'true';
+
+    const multiStepService = new AgentService(
+      new TestPortfolioService(makeTestHoldings()) as unknown as PortfolioService,
+      new SessionMemoryService()
+    );
+
+    const graphChat = jest
+      .fn()
+      .mockResolvedValue({
+        response: 'Risk and ESG review completed.',
+        sessionId: TEST_SESSION,
+        toolCalls: [
+          {
+            args: {},
+            name: 'portfolio_risk_analysis',
+            result: '{"concentration":{}}'
+          },
+          {
+            args: { filterCategory: 'fossil_fuels' },
+            name: 'compliance_check',
+            result: '{"complianceScore":95}'
+          }
+        ]
+      });
+
+    (multiStepService as any).graphAgent = { chat: graphChat };
+
+    const result = await multiStepService.chat({
+      message: 'How risky am I and is it ESG compliant?',
+      sessionId: TEST_SESSION,
+      userId: TEST_USER_ID
+    });
+
+    expect(graphChat).toHaveBeenCalled();
+    expect(result.toolCalls).toHaveLength(2);
+    expect(result.toolCalls[0].name).toBe('portfolio_risk_analysis');
+    expect(result.toolCalls[1].name).toBe('compliance_check');
+  });
+
+  it('should retain context across five turns in same session', async () => {
+    mockedMarketDataFetch.mockImplementation(
+      async ({ symbols }: { symbols: string[] }) => {
+        return symbols.reduce<Record<string, any>>(
+          (acc, symbol) => ({
+          ...acc,
+          [symbol]: { name: symbol, price: 100, symbol }
+          }),
+          {}
+        );
+      }
+    );
+
+    await service.chat({
+      message: 'Price of AAPL',
+      sessionId: TEST_SESSION,
+      userId: TEST_USER_ID
+    });
+    await service.chat({
+      message: 'And MSFT?',
+      sessionId: TEST_SESSION,
+      userId: TEST_USER_ID
+    });
+    await service.chat({
+      message: 'And GOOGL?',
+      sessionId: TEST_SESSION,
+      userId: TEST_USER_ID
+    });
+    await service.chat({
+      message: 'And AMZN?',
+      sessionId: TEST_SESSION,
+      userId: TEST_USER_ID
+    });
+
+    const result = await service.chat({
+      message: 'How about it?',
+      sessionId: TEST_SESSION,
+      userId: TEST_USER_ID
+    });
+
+    expect(result.toolCalls).toHaveLength(1);
+    expect(result.toolCalls[0].name).toBe('market_data_fetch');
+    const toolResult = JSON.parse(result.toolCalls[0].result);
+    expect(Object.keys(toolResult)).toContain('AMZN');
+  });
+
+  it('should fallback to deterministic path when graph model call fails', async () => {
+    process.env.ENABLE_FEATURE_AGENT_LANGGRAPH = 'true';
+
+    const fallbackService = new AgentService(
+      new TestPortfolioService(makeTestHoldings()) as unknown as PortfolioService,
+      new SessionMemoryService()
+    );
+
+    const graphChat = jest
+      .fn()
+      .mockRejectedValue(
+        new AgentError(
+          ErrorType.MODEL,
+          'Model timed out after 12000ms.',
+          true
+        )
+      );
+    const deterministicChat = jest.fn().mockResolvedValue({
+      response: 'Deterministic fallback response.',
+      sessionId: TEST_SESSION,
+      toolCalls: []
+    });
+
+    (fallbackService as any).graphAgent = { chat: graphChat };
+    (fallbackService as any).deterministicAgent = { chat: deterministicChat };
+
+    const result = await fallbackService.chat({
+      message: 'Analyze my portfolio risk',
+      sessionId: TEST_SESSION,
+      userId: TEST_USER_ID
+    });
+
+    expect(graphChat).toHaveBeenCalled();
+    expect(deterministicChat).toHaveBeenCalled();
+    expect(result.response).toBe('Deterministic fallback response.');
   });
 });

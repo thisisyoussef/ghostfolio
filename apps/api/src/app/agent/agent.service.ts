@@ -1,649 +1,173 @@
 import { PortfolioService } from '@ghostfolio/api/app/portfolio/portfolio.service';
+import { ConfigurationService } from '@ghostfolio/api/services/configuration/configuration.service';
 
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { traceable } from 'langsmith/traceable';
+import { createHash } from 'node:crypto';
 
+import { type ChatRequest, type ChatResponse } from './agent.types';
 import { AgentError, ErrorType } from './errors/agent-error';
 import { SessionMemoryService } from './memory/session-memory.service';
-import { complianceCheck } from './tools/compliance-checker.tool';
-import { marketDataFetch } from './tools/market-data.tool';
-import { portfolioRiskAnalysis } from './tools/portfolio-analysis.tool';
+import { AgentGraphService } from './orchestration/agent-graph.service';
+import { DeterministicAgentService } from './orchestration/deterministic-agent.service';
+import { AgentToolRegistry } from './orchestration/tool-registry';
 import { ensureLangSmithEnv } from './tracing/langsmith.config';
 
-// Initialize LangSmith env defaults at module load time
 ensureLangSmithEnv();
-
-interface ToolCallInfo {
-  name: string;
-  args: Record<string, unknown>;
-  result: string;
-}
-
-export interface ChatResponse {
-  response: string;
-  toolCalls: ToolCallInfo[];
-  sessionId: string;
-  isError?: boolean;
-  errorType?: string;
-}
-
-// Keywords that indicate ESG/compliance questions
-const ESG_KEYWORDS = [
-  'esg',
-  'compliance',
-  'compliant',
-  'ethical',
-  'sustainable',
-  'fossil fuel',
-  'weapons',
-  'defense',
-  'tobacco',
-  'gambling',
-  'controversial',
-  'labor',
-  'sin stock',
-  'green invest',
-  'socially responsible'
-];
-
-// Keywords that indicate a portfolio risk/analysis question
-const PORTFOLIO_KEYWORDS = [
-  'portfolio',
-  'concentration',
-  'allocation',
-  'diversif',
-  'risk',
-  'holdings',
-  'asset class',
-  'hhi',
-  'herfindahl',
-  'performed',
-  'performance',
-  'return',
-  'invested'
-];
-
-export function isEsgQuestion(message: string): boolean {
-  const lower = message.toLowerCase();
-  return ESG_KEYWORDS.some((keyword) => lower.includes(keyword));
-}
-
-export function isPortfolioQuestion(message: string): boolean {
-  const lower = message.toLowerCase();
-  return PORTFOLIO_KEYWORDS.some((keyword) => lower.includes(keyword));
-}
-
-export function detectCategoryFilter(message: string): string | undefined {
-  const lower = message.toLowerCase();
-  const categoryMap: Record<string, string> = {
-    'fossil fuel': 'fossil_fuels',
-    'oil': 'fossil_fuels',
-    'gas': 'fossil_fuels',
-    'coal': 'fossil_fuels',
-    'energy': 'fossil_fuels',
-    'weapon': 'weapons_defense',
-    'defense': 'weapons_defense',
-    'military': 'weapons_defense',
-    'tobacco': 'tobacco',
-    'smoking': 'tobacco',
-    'cigarette': 'tobacco',
-    'gambling': 'gambling',
-    'casino': 'gambling',
-    'betting': 'gambling',
-    'labor': 'controversial_labor',
-    'sweatshop': 'controversial_labor'
-  };
-  for (const [keyword, category] of Object.entries(categoryMap)) {
-    if (lower.includes(keyword)) {
-      return category;
-    }
-  }
-  return undefined;
-}
 
 @Injectable()
 export class AgentService {
-  constructor(
-    private readonly portfolioService: PortfolioService,
-    private readonly sessionMemory: SessionMemoryService
-  ) {}
+  private readonly deterministicAgent: DeterministicAgentService;
+  private readonly graphAgent: AgentGraphService;
 
-  async chat(input: {
-    message: string;
-    sessionId: string;
-    userId: string;
-  }): Promise<ChatResponse> {
-    // Wrap the entire chat flow in a traceable span so every request
-    // appears in the LangSmith Tracing tab under the ghostfolio-agent project
+  public constructor(
+    private readonly portfolioService: PortfolioService,
+    private readonly sessionMemory: SessionMemoryService,
+    @Optional() private readonly configurationService?: ConfigurationService
+  ) {
+    const toolRegistry = new AgentToolRegistry(this.portfolioService);
+
+    this.deterministicAgent = new DeterministicAgentService(
+      this.portfolioService,
+      this.sessionMemory
+    );
+    this.graphAgent = new AgentGraphService(
+      this.sessionMemory,
+      toolRegistry,
+      this.configurationService
+    );
+  }
+
+  public async chat(input: ChatRequest): Promise<ChatResponse> {
+    const orchestrator = this.isGraphEnabled() ? 'langgraph' : 'deterministic';
+
     const traceableChat = traceable(
-      async (params: {
-        message: string;
-        sessionId: string;
-        userId: string;
-      }): Promise<ChatResponse> => {
-        return this._chatImpl(params);
+      async (params: ChatRequest): Promise<ChatResponse> => {
+        return this.chatImpl(params);
       },
-      { name: 'agent_chat', run_type: 'chain' }
+      {
+        metadata: {
+          orchestrator,
+          session_id: input.sessionId,
+          user_hash: this.hashUserId(input.userId)
+        },
+        name: 'agent_chat',
+        run_type: 'chain'
+      }
     );
 
     return traceableChat(input);
   }
 
-  private async _chatImpl(input: {
-    message: string;
-    sessionId: string;
-    userId: string;
-  }): Promise<ChatResponse> {
-    const { message, sessionId, userId } = input;
+  private async chatImpl(input: ChatRequest): Promise<ChatResponse> {
+    const { message, sessionId } = input;
 
     if (!message.trim()) {
       return {
         response: 'Please provide a message to get started.',
-        toolCalls: [],
-        sessionId
-      };
-    }
-
-    // Route to compliance check if the question is about ESG
-    if (isEsgQuestion(message)) {
-      return this.handleComplianceQuestion(message, sessionId, userId);
-    }
-
-    // Route to portfolio analysis if the question is about portfolio risk
-    if (isPortfolioQuestion(message)) {
-      return this.handlePortfolioQuestion(message, sessionId, userId);
-    }
-
-    // Use context resolution for symbol extraction (supports follow-ups)
-    const context = this.resolveContext(message, sessionId);
-    const symbols = context.symbols;
-
-    if (symbols.length === 0) {
-      return {
-        response:
-          'I can help you with:\n' +
-          '- ESG compliance check (ask about ESG, ethical investing, fossil fuels, etc.)\n' +
-          '- Portfolio risk analysis (ask about concentration, allocation, or performance)\n' +
-          '- Stock market data (include ticker symbols like AAPL, MSFT)\n\n' +
-          'What would you like to know?',
-        toolCalls: [],
-        sessionId
-      };
-    }
-
-    // Fetch market data — wrapped in a traceable tool span
-    return this.handleMarketDataQuestion(symbols, sessionId);
-  }
-
-  private async handleMarketDataQuestion(
-    symbols: string[],
-    sessionId: string
-  ): Promise<ChatResponse> {
-    const traceableMarketData = traceable(
-      async (params: {
-        symbols: string[];
-      }): Promise<ChatResponse> => {
-        return this._marketDataImpl(params.symbols, sessionId);
-      },
-      { name: 'market_data_fetch', run_type: 'tool' }
-    );
-
-    return traceableMarketData({ symbols });
-  }
-
-  private async _marketDataImpl(
-    symbols: string[],
-    sessionId: string
-  ): Promise<ChatResponse> {
-    try {
-      const marketData = await marketDataFetch({ symbols });
-      const toolCalls: ToolCallInfo[] = [
-        {
-          name: 'market_data_fetch',
-          args: { symbols },
-          result: JSON.stringify(marketData)
-        }
-      ];
-
-      const successParts: string[] = [];
-      const failedSymbols: string[] = [];
-      for (const symbol of symbols) {
-        const data = marketData[symbol];
-        if (data.error) {
-          failedSymbols.push(symbol);
-        } else {
-          const priceStr = data.price ? `$${data.price.toFixed(2)}` : 'N/A';
-          const nameStr = data.name ? ` (${data.name})` : '';
-          successParts.push(`${symbol}${nameStr}: ${priceStr}`);
-        }
-      }
-
-      const parts: string[] = [...successParts];
-      if (failedSymbols.length > 0) {
-        const symbolList = failedSymbols.join(', ');
-        if (failedSymbols.length === symbols.length) {
-          // All symbols failed
-          parts.push(
-            `I wasn't able to retrieve market data for ${symbolList} right now. ` +
-              'The data provider may be temporarily unavailable — please try again in a moment.'
-          );
-        } else {
-          // Partial failure
-          parts.push(
-            `\nNote: I couldn't fetch data for ${symbolList} at this time. ` +
-              'The data provider may be temporarily unavailable for these symbols.'
-          );
-        }
-      }
-
-      // Update session memory after successful tool call
-      this.sessionMemory.updateSession(sessionId, {
-        lastSymbols: symbols,
-        lastTool: 'market_data',
-        lastTopic: null
-      });
-
-      const allFailed =
-        failedSymbols.length > 0 && failedSymbols.length === symbols.length;
-
-      return {
-        response: parts.join('\n'),
-        toolCalls,
         sessionId,
-        ...(allFailed && { isError: true, errorType: ErrorType.DATA })
+        toolCalls: []
       };
-    } catch (err) {
-      const classified =
-        err instanceof AgentError
-          ? err
+    }
+
+    if (!this.isGraphEnabled()) {
+      const response = await this.deterministicAgent.chat(input);
+      await this.persistTurn(input, response);
+      return response;
+    }
+
+    try {
+      const response = await this.graphAgent.chat(input);
+      await this.persistTurn(input, response);
+      return response;
+    } catch (error) {
+      const modelError =
+        error instanceof AgentError
+          ? error
           : new AgentError(
-              ErrorType.DATA,
-              'Failed to fetch market data. Please try again later.',
+              ErrorType.MODEL,
+              'Model orchestration failed. Please try again shortly.',
               true,
-              err instanceof Error ? err : undefined
+              error instanceof Error ? error : undefined
             );
-      console.error(
-        `[agent] ${classified.type} error:`,
-        classified.userMessage
-      );
-      return {
-        response: classified.userMessage,
-        toolCalls: [],
-        sessionId,
-        isError: true,
-        errorType: classified.type
-      };
-    }
-  }
 
-  private detectCategoryFilter(message: string): string | undefined {
-    return detectCategoryFilter(message);
-  }
+      console.error(`[agent] ${modelError.type} error:`, modelError.userMessage);
 
-  private async handleComplianceQuestion(
-    message: string,
-    sessionId: string,
-    userId: string
-  ): Promise<ChatResponse> {
-    const traceableCompliance = traceable(
-      async (params: {
-        message: string;
-        sessionId: string;
-        userId: string;
-      }): Promise<ChatResponse> => {
-        return this._complianceImpl(
-          params.message,
-          params.sessionId,
-          params.userId
-        );
-      },
-      { name: 'compliance_check', run_type: 'tool' }
-    );
+      try {
+        const fallbackResponse = await this.deterministicAgent.chat(input);
+        await this.persistTurn(input, fallbackResponse);
+        return fallbackResponse;
+      } catch (fallbackError) {
+        const fallback =
+          fallbackError instanceof AgentError
+            ? fallbackError
+            : new AgentError(
+                ErrorType.MODEL,
+                modelError.userMessage,
+                true,
+                fallbackError instanceof Error ? fallbackError : undefined
+              );
 
-    return traceableCompliance({ message, sessionId, userId });
-  }
-
-  private async _complianceImpl(
-    message: string,
-    sessionId: string,
-    userId: string
-  ): Promise<ChatResponse> {
-    let holdings: Record<string, any>;
-    try {
-      const details = await this.portfolioService.getDetails({
-        dateRange: 'max' as any,
-        filters: [],
-        impersonationId: undefined,
-        userId,
-        withSummary: false
-      });
-      holdings = details.holdings || {};
-    } catch {
-      return {
-        response:
-          'Unable to check portfolio compliance — portfolio service unavailable.',
-        toolCalls: [],
-        sessionId,
-        isError: true,
-        errorType: ErrorType.SERVICE
-      };
-    }
-
-    // Convert holdings to the format expected by complianceCheck
-    const holdingInputs = Object.entries(holdings).map(
-      ([symbol, data]: [string, any]) => ({
-        symbol,
-        name: data.name || symbol,
-        valueInBaseCurrency: data.valueInBaseCurrency || 0
-      })
-    );
-
-    if (holdingInputs.length === 0) {
-      return {
-        response: 'No holdings found in portfolio — nothing to check.',
-        toolCalls: [],
-        sessionId
-      };
-    }
-
-    // Detect category filter from the message
-    const filterCategory = this.detectCategoryFilter(message);
-
-    const result = await complianceCheck({
-      holdings: holdingInputs,
-      filterCategory
-    });
-
-    const toolCalls: ToolCallInfo[] = [
-      {
-        name: 'compliance_check',
-        args: { filterCategory: filterCategory || 'all' },
-        result: JSON.stringify(result)
-      }
-    ];
-
-    // Build human-readable response
-    const parts: string[] = [];
-    const filterLabel = filterCategory
-      ? ` (${filterCategory.replace(/_/g, ' ')})`
-      : '';
-
-    parts.push(`### 🌱 ESG Compliance Report${filterLabel}`);
-    parts.push('');
-    parts.push(`- **Compliance Score:** ${result.complianceScore}%`);
-    parts.push(`- **Holdings checked:** ${result.totalChecked}`);
-    parts.push(
-      `- **Source:** ESG Violations Dataset v${result.datasetVersion} (${result.datasetLastUpdated})`
-    );
-
-    if (result.violations.length > 0) {
-      parts.push('');
-      parts.push('### ⚠️ Violations Found');
-      parts.push('');
-      for (const v of result.violations) {
-        const cats = v.categories.join(', ').replace(/_/g, ' ');
-        parts.push(
-          `- **${v.name}** — ${cats} [${v.severity}]: ${v.reason}`
-        );
-      }
-    } else {
-      parts.push('');
-      parts.push('✅ No ESG violations found in your portfolio.');
-    }
-
-    if (result.cleanHoldings.length > 0 && result.violations.length > 0) {
-      parts.push('');
-      parts.push('### ✅ Clean Holdings');
-      parts.push('');
-      for (const h of result.cleanHoldings) {
-        parts.push(`- ${h.name}`);
-      }
-    }
-
-    // Update session memory after successful compliance check
-    this.sessionMemory.updateSession(sessionId, {
-      lastSymbols: [],
-      lastTool: 'compliance',
-      lastTopic: filterCategory || 'esg'
-    });
-
-    return {
-      response: parts.join('\n'),
-      toolCalls,
-      sessionId
-    };
-  }
-
-  private async handlePortfolioQuestion(
-    message: string,
-    sessionId: string,
-    userId: string
-  ): Promise<ChatResponse> {
-    const traceablePortfolio = traceable(
-      async (params: {
-        message: string;
-        sessionId: string;
-        userId: string;
-      }): Promise<ChatResponse> => {
-        return this._portfolioImpl(
-          params.message,
-          params.sessionId,
-          params.userId
-        );
-      },
-      { name: 'portfolio_risk_analysis', run_type: 'tool' }
-    );
-
-    return traceablePortfolio({ message, sessionId, userId });
-  }
-
-  private async _portfolioImpl(
-    message: string,
-    sessionId: string,
-    userId: string
-  ): Promise<ChatResponse> {
-    try {
-      const result = await portfolioRiskAnalysis(
-        {},
-        this.portfolioService,
-        userId
-      );
-
-      const toolCalls: ToolCallInfo[] = [
-        {
-          name: 'portfolio_risk_analysis',
-          args: { message },
-          result: JSON.stringify(result)
-        }
-      ];
-
-      if (result.error) {
-        return {
-          response: result.error,
-          toolCalls,
-          sessionId,
+        const response: ChatResponse = {
+          errorType: ErrorType.MODEL,
           isError: true,
-          errorType: ErrorType.SERVICE
+          response: fallback.userMessage,
+          sessionId,
+          toolCalls: []
         };
+
+        await this.persistTurn(input, response);
+
+        return response;
       }
+    }
+  }
 
-      // Build human-readable response
-      const parts: string[] = [];
-      const fmt = (n: number) =>
-        n.toLocaleString(undefined, {
-          minimumFractionDigits: 2,
-          maximumFractionDigits: 2
-        });
+  private getBooleanConfig(
+    key: 'ENABLE_FEATURE_AGENT_LANGGRAPH',
+    fallback: boolean
+  ): boolean {
+    const envValue = process.env[key];
+    if (envValue !== undefined) {
+      return String(envValue).toLowerCase() === 'true';
+    }
 
-      // Concentration section
-      const c = result.concentration;
-      parts.push('### 📊 Portfolio Risk Overview');
-      parts.push('');
-      parts.push(
-        `- **Top holding:** ${c.topHoldingSymbol} at ${c.topHoldingPercent}%`
-      );
-      parts.push(`- **Diversification:** ${c.diversificationLevel}`);
+    if (!this.configurationService) {
+      return fallback;
+    }
 
-      if (c.topHoldings.length > 1) {
-        parts.push('');
-        parts.push('**Top Holdings**');
-        parts.push('');
-        for (const h of c.topHoldings) {
-          const label =
-            h.symbol === h.name ? h.name : `${h.symbol} — ${h.name}`;
-          parts.push(`- ${label}: **${h.percentage}%**`);
-        }
-      }
+    try {
+      return Boolean(this.configurationService.get(key as any));
+    } catch {
+      return fallback;
+    }
+  }
 
-      // Allocation section
-      parts.push('');
-      parts.push('### 📈 Asset Allocation');
-      parts.push('');
-      for (const [assetClass, pct] of Object.entries(
-        result.allocation.byAssetClass
-      )) {
-        parts.push(`- ${assetClass}: **${pct}%**`);
-      }
+  private hashUserId(userId: string): string {
+    return createHash('sha256').update(userId).digest('hex').slice(0, 16);
+  }
 
-      // Performance section
-      const p = result.performance;
-      const sign = p.totalReturn >= 0 ? '+' : '';
-      parts.push('');
-      parts.push('### 💰 Performance Summary');
-      parts.push('');
-      parts.push(`- **Current value:** $${fmt(p.currentValue)}`);
-      parts.push(`- **Total invested:** $${fmt(p.totalInvestment)}`);
-      parts.push(
-        `- **Total return:** ${sign}$${fmt(p.totalReturn)} (${sign}${p.totalReturnPercent}%)`
-      );
+  private isGraphEnabled(): boolean {
+    return this.getBooleanConfig('ENABLE_FEATURE_AGENT_LANGGRAPH', false);
+  }
 
-      parts.push('');
-      parts.push(`*${result.holdingsCount} holdings analyzed*`);
-
-      // Update session memory after successful portfolio analysis
-      this.sessionMemory.updateSession(sessionId, {
-        lastSymbols: [],
-        lastTool: 'portfolio',
-        lastTopic: 'risk_analysis'
+  private async persistTurn(
+    input: ChatRequest,
+    response: ChatResponse
+  ): Promise<void> {
+    try {
+      await this.sessionMemory.addTurn({
+        assistantMessage: response.response,
+        sessionId: input.sessionId,
+        toolCalls: response.toolCalls,
+        userId: input.userId,
+        userMessage: input.message
       });
-
-      return {
-        response: parts.join('\n'),
-        toolCalls,
-        sessionId
-      };
-    } catch (err) {
-      const classified =
-        err instanceof AgentError
-          ? err
-          : new AgentError(
-              ErrorType.SERVICE,
-              'Unable to access portfolio data. Please try again later.',
-              true,
-              err instanceof Error ? err : undefined
-            );
-      console.error(
-        `[agent] ${classified.type} error:`,
-        classified.userMessage
-      );
-      return {
-        response: classified.userMessage,
-        toolCalls: [],
-        sessionId,
-        isError: true,
-        errorType: classified.type
-      };
+    } catch (error) {
+      const details = error instanceof Error ? error.message : String(error);
+      console.warn(`[agent] failed to persist chat turn: ${details}`);
     }
-  }
-
-  private resolveContext(
-    message: string,
-    sessionId: string
-  ): { symbols: string[]; tool: string | null } {
-    const session = this.sessionMemory.getSession(sessionId);
-    if (!session) {
-      return { symbols: this.extractSymbols(message), tool: null };
-    }
-
-    // Check for follow-up patterns: "what about X?", "how about X?", "and X?"
-    const followUpMatch =
-      message.match(/(?:what|how)\s+about\s+([A-Z]{1,5})\b/i) ||
-      message.match(/\band\s+([A-Z]{1,5})\b/i);
-
-    if (followUpMatch) {
-      const newSymbol = followUpMatch[1].toUpperCase();
-      return { symbols: [newSymbol], tool: session.lastTool };
-    }
-
-    // If no symbols/keywords detected, fall back to session context
-    const extracted = this.extractSymbols(message);
-    if (
-      extracted.length === 0 &&
-      !isEsgQuestion(message) &&
-      !isPortfolioQuestion(message)
-    ) {
-      if (session.lastSymbols.length > 0) {
-        return { symbols: session.lastSymbols, tool: session.lastTool };
-      }
-    }
-
-    return { symbols: extracted, tool: null };
-  }
-
-  private extractSymbols(message: string): string[] {
-    const symbolPattern = /\b([A-Z]{1,12})\b/g;
-    const potentialSymbols = message.match(symbolPattern) || [];
-    const commonWords = new Set([
-      'I',
-      'A',
-      'THE',
-      'IS',
-      'IT',
-      'OF',
-      'AND',
-      'OR',
-      'TO',
-      'IN',
-      'FOR',
-      'ON',
-      'AT',
-      'BY',
-      'AN',
-      'BE',
-      'AS',
-      'DO',
-      'IF',
-      'SO',
-      'NO',
-      'UP',
-      'MY',
-      'ME',
-      'WE',
-      'HE',
-      'CAN',
-      'HOW',
-      'ARE',
-      'NOT',
-      'BUT',
-      'ALL',
-      'HAS',
-      'WAS',
-      'HAD',
-      'GET',
-      'GOT',
-      'WHAT',
-      'TELL',
-      'SHOW',
-      'GIVE',
-      'ABOUT',
-      'PRICE',
-      'STOCK',
-      'MARKET',
-      'DATA',
-      'QUOTE'
-    ]);
-    return potentialSymbols.filter(
-      (s) => !commonWords.has(s) && s.length >= 2
-    );
   }
 }
+
+export type { ChatResponse } from './agent.types';

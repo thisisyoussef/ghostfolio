@@ -1,141 +1,190 @@
-import { SessionMemoryService } from './session-memory.service';
+import {
+  SessionMemoryService,
+  type SessionMessage
+} from './session-memory.service';
+
+class FakeRedisCacheService {
+  public failRead = false;
+  public failWrite = false;
+  public readonly store = new Map<string, string>();
+
+  public async get(key: string): Promise<string | null> {
+    if (this.failRead) {
+      throw new Error('redis read failed');
+    }
+
+    return this.store.get(key) || null;
+  }
+
+  public async set(
+    key: string,
+    value: string,
+    _ttl?: number
+  ): Promise<void> {
+    if (this.failWrite) {
+      throw new Error('redis write failed');
+    }
+
+    this.store.set(key, value);
+  }
+}
 
 describe('SessionMemoryService', () => {
-  let service: SessionMemoryService;
+  const USER_ID = 'user-1';
+  const SESSION_ID = 'session-1';
 
-  beforeEach(() => {
-    service = new SessionMemoryService();
+  afterEach(() => {
+    delete process.env.AGENT_MEMORY_MAX_MESSAGES;
+    delete process.env.AGENT_MEMORY_RECENT_MESSAGES;
+    delete process.env.AGENT_MEMORY_TTL_SECONDS;
+    jest.restoreAllMocks();
   });
 
-  // Happy path (3)
-  it('should store and retrieve session state', () => {
-    service.updateSession('s1', {
-      lastSymbols: ['AAPL'],
-      lastTool: 'market_data',
-      lastTopic: null
-    });
-    const state = service.getSession('s1');
-    expect(state).toBeDefined();
-    expect(state!.lastSymbols).toEqual(['AAPL']);
-    expect(state!.lastTool).toBe('market_data');
-    expect(state!.turnCount).toBe(1);
+  it('should append and retrieve full session message history', async () => {
+    const service = new SessionMemoryService();
+
+    await service.appendMessages(USER_ID, SESSION_ID, [
+      {
+        content: 'Price of AAPL',
+        createdAt: Date.now(),
+        role: 'user'
+      },
+      {
+        content: 'AAPL: $190.00',
+        createdAt: Date.now(),
+        role: 'assistant'
+      }
+    ]);
+
+    const record = await service.getSessionRecord(USER_ID, SESSION_ID);
+
+    expect(record).toBeDefined();
+    expect(record?.messages).toHaveLength(2);
+    expect(record?.messages[0].role).toBe('user');
+    expect(record?.messages[1].role).toBe('assistant');
   });
 
-  it('should carry context across multiple updates (turnCount grows)', () => {
-    service.updateSession('s1', {
-      lastSymbols: ['AAPL'],
-      lastTool: 'market_data',
-      lastTopic: null
-    });
-    service.updateSession('s1', {
-      lastSymbols: ['MSFT'],
-      lastTool: 'market_data',
-      lastTopic: null
-    });
-    const state = service.getSession('s1');
-    expect(state!.turnCount).toBe(2);
-    expect(state!.lastSymbols).toEqual(['MSFT']);
+  it('should support 5+ turn recall for same session', async () => {
+    const service = new SessionMemoryService();
+
+    for (let i = 1; i <= 6; i += 1) {
+      await service.appendMessages(USER_ID, SESSION_ID, [
+        {
+          content: `Question ${i}`,
+          createdAt: Date.now(),
+          role: 'user'
+        },
+        {
+          content: `Answer ${i}`,
+          createdAt: Date.now(),
+          role: 'assistant'
+        }
+      ]);
+    }
+
+    const context = await service.getConversationContext(USER_ID, SESSION_ID);
+
+    expect(context.turnCount).toBe(6);
+    expect(context.recentMessages.length).toBeGreaterThanOrEqual(6);
+    expect(context.recentMessages[0].content).toContain('Question');
   });
 
-  it('should handle tool switching within same session', () => {
-    service.updateSession('s1', {
-      lastSymbols: ['AAPL'],
-      lastTool: 'market_data',
-      lastTopic: null
-    });
-    service.updateSession('s1', {
-      lastSymbols: [],
-      lastTool: 'compliance',
-      lastTopic: 'esg'
-    });
-    const state = service.getSession('s1');
-    expect(state!.lastTool).toBe('compliance');
-    expect(state!.lastTopic).toBe('esg');
-  });
+  it('should compact history into summary when max message threshold is exceeded', async () => {
+    process.env.AGENT_MEMORY_MAX_MESSAGES = '4';
+    process.env.AGENT_MEMORY_RECENT_MESSAGES = '2';
 
-  // Edge cases (3)
-  it('should keep independent sessions completely separate', () => {
-    service.updateSession('s1', {
-      lastSymbols: ['AAPL'],
-      lastTool: 'market_data',
-      lastTopic: null
-    });
-    service.updateSession('s2', {
-      lastSymbols: ['TSLA'],
-      lastTool: 'portfolio',
-      lastTopic: null
-    });
-    expect(service.getSession('s1')!.lastSymbols).toEqual(['AAPL']);
-    expect(service.getSession('s2')!.lastSymbols).toEqual(['TSLA']);
-  });
+    const service = new SessionMemoryService();
 
-  it('should handle session_id with special characters (Unicode, slashes)', () => {
-    const id = 'session/caf\u00e9-\u65e5\u672c\u8a9e/123';
-    service.updateSession(id, {
-      lastSymbols: ['AAPL'],
-      lastTool: 'market_data',
-      lastTopic: null
-    });
-    expect(service.getSession(id)).toBeDefined();
-    expect(service.getSession(id)!.lastSymbols).toEqual(['AAPL']);
-  });
-
-  it('should handle rapid sequential updates to same session', () => {
-    for (let i = 0; i < 20; i++) {
-      service.updateSession('s1', {
-        lastSymbols: [`SYM${i}`],
-        lastTool: 'market_data',
-        lastTopic: null
+    const history: SessionMessage[] = [];
+    for (let i = 1; i <= 8; i += 1) {
+      history.push({
+        content: `message-${i}`,
+        createdAt: Date.now(),
+        role: i % 2 === 0 ? 'assistant' : 'user'
       });
     }
-    const state = service.getSession('s1');
-    expect(state!.turnCount).toBe(20);
-    expect(state!.lastSymbols).toEqual(['SYM19']);
+
+    await service.appendMessages(USER_ID, SESSION_ID, history);
+
+    const record = await service.getSessionRecord(USER_ID, SESSION_ID);
+
+    expect(record).toBeDefined();
+    expect(record?.messages.length).toBeLessThanOrEqual(2);
+    expect(record?.summary).toContain('message-1');
+    expect(record?.summary).toContain('message-6');
   });
 
-  // Error/failure modes (2)
-  it('should return undefined for non-existent session (not throw)', () => {
-    expect(service.getSession('nonexistent')).toBeUndefined();
+  it('should return latest market symbols context from stored tool messages', async () => {
+    const service = new SessionMemoryService();
+
+    await service.appendMessages(USER_ID, SESSION_ID, [
+      {
+        content: '{"AAPL":{"price":190}}',
+        createdAt: Date.now(),
+        role: 'tool',
+        toolArgs: { symbols: ['AAPL'] },
+        toolName: 'market_data_fetch',
+        toolResultSummary: 'AAPL market data'
+      },
+      {
+        content: 'AAPL is trading at $190',
+        createdAt: Date.now(),
+        role: 'assistant'
+      }
+    ]);
+
+    const context = await service.getLatestMarketContext(USER_ID, SESSION_ID);
+
+    expect(context.lastSymbols).toEqual(['AAPL']);
+    expect(context.lastTool).toBe('market_data_fetch');
   });
 
-  it('should handle updateSession with empty symbols array (no-op on symbols)', () => {
-    service.updateSession('s1', {
-      lastSymbols: ['AAPL'],
-      lastTool: 'market_data',
-      lastTopic: null
+  it('should fallback to in-process memory when redis read/write fails', async () => {
+    const fakeRedis = new FakeRedisCacheService();
+    fakeRedis.failRead = true;
+    fakeRedis.failWrite = true;
+
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {
+      // no-op
     });
-    service.updateSession('s1', {
-      lastSymbols: [],
-      lastTool: 'market_data',
-      lastTopic: null
-    });
-    const state = service.getSession('s1');
-    expect(state!.lastSymbols).toEqual([]);
-    expect(state!.turnCount).toBe(2);
+
+    const service = new SessionMemoryService(fakeRedis as any);
+
+    await service.appendMessages(USER_ID, SESSION_ID, [
+      {
+        content: 'test',
+        createdAt: Date.now(),
+        role: 'user'
+      }
+    ]);
+
+    const record = await service.getSessionRecord(USER_ID, SESSION_ID);
+
+    expect(record).toBeDefined();
+    expect(record?.messages).toHaveLength(1);
+    expect(warnSpy).toHaveBeenCalled();
   });
 
-  // Boundary conditions (2)
-  it('should evict oldest session when LRU limit is reached', () => {
-    const small = new SessionMemoryService(5);
-    for (let i = 0; i < 6; i++) {
-      small.updateSession(`s${i}`, {
-        lastSymbols: [],
-        lastTool: null,
-        lastTopic: null
-      });
-    }
-    expect(small.getSession('s0')).toBeUndefined();
-    expect(small.getSession('s5')).toBeDefined();
-  });
+  it('should expire fallback memory entries based on TTL', async () => {
+    process.env.AGENT_MEMORY_TTL_SECONDS = '1';
 
-  it('should handle very long conversation (50+ turns) without crash', () => {
-    for (let i = 0; i < 60; i++) {
-      service.updateSession('long', {
-        lastSymbols: ['AAPL'],
-        lastTool: 'market_data',
-        lastTopic: null
-      });
-    }
-    expect(service.getSession('long')!.turnCount).toBe(60);
+    const nowSpy = jest.spyOn(Date, 'now');
+    nowSpy.mockReturnValue(1_000);
+
+    const service = new SessionMemoryService();
+
+    await service.appendMessages(USER_ID, SESSION_ID, [
+      {
+        content: 'short-lived message',
+        createdAt: Date.now(),
+        role: 'user'
+      }
+    ]);
+
+    nowSpy.mockReturnValue(2_500);
+
+    const record = await service.getSessionRecord(USER_ID, SESSION_ID);
+
+    expect(record).toBeUndefined();
   });
 });

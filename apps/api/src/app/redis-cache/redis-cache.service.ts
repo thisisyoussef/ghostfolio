@@ -4,35 +4,53 @@ import { AssetProfileIdentifier, Filter } from '@ghostfolio/common/interfaces';
 
 import { CACHE_MANAGER, Cache } from '@nestjs/cache-manager';
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import Keyv from 'keyv';
 import ms from 'ms';
 import { createHash } from 'node:crypto';
 
+interface CacheManagerLike {
+  clear(): Promise<void>;
+  del(key: string): Promise<void>;
+  get<T = unknown>(key: string): Promise<T | null>;
+  mdel(keys: string[]): Promise<void>;
+  set(key: string, value: string, ttl?: number): Promise<void>;
+  stores?: CacheStoreLike[];
+}
+
+interface CacheStoreLike {
+  deserialize?: (value: string) => unknown;
+  iterator?(options: Record<string, unknown>): AsyncIterable<[string, unknown]>;
+  on?(event: string, handler: (error: Error) => void): void;
+}
+
 @Injectable()
 export class RedisCacheService {
-  private client: Keyv;
+  private readonly cacheAdapter: CacheManagerLike;
+  private readonly client?: CacheStoreLike;
 
   public constructor(
     @Inject(CACHE_MANAGER) private readonly cache: Cache,
     private readonly configurationService: ConfigurationService
   ) {
-    this.client = cache.stores[0];
+    this.cacheAdapter = this.cache as unknown as CacheManagerLike;
+    this.client = this.cacheAdapter.stores?.[0];
 
-    this.client.deserialize = (value) => {
-      try {
-        return JSON.parse(value);
-      } catch {}
+    if (this.client) {
+      this.client.deserialize = (value) => {
+        try {
+          return JSON.parse(value);
+        } catch {}
 
-      return value;
-    };
+        return value;
+      };
 
-    this.client.on('error', (error) => {
-      Logger.error(error, 'RedisCacheService');
-    });
+      this.client.on?.('error', (error) => {
+        Logger.error(error, 'RedisCacheService');
+      });
+    }
   }
 
   public async get(key: string): Promise<string> {
-    return this.cache.get(key);
+    return this.cacheAdapter.get<string>(key) as Promise<string>;
   }
 
   public async getKeys(aPrefix?: string): Promise<string[]> {
@@ -40,6 +58,10 @@ export class RedisCacheService {
     const prefix = aPrefix;
 
     try {
+      if (!this.client?.iterator) {
+        return keys;
+      }
+
       for await (const [key] of this.client.iterator({})) {
         if ((prefix && key.startsWith(prefix)) || !prefix) {
           keys.push(key);
@@ -109,7 +131,7 @@ export class RedisCacheService {
   }
 
   public async remove(key: string) {
-    return this.cache.del(key);
+    return this.cacheAdapter.del(key);
   }
 
   public async removePortfolioSnapshotsByUserId({
@@ -121,15 +143,15 @@ export class RedisCacheService {
       `${this.getPortfolioSnapshotKey({ userId })}`
     );
 
-    return this.cache.mdel(keys);
+    return this.cacheAdapter.mdel(keys);
   }
 
   public async reset() {
-    return this.cache.clear();
+    return this.cacheAdapter.clear();
   }
 
   public async set(key: string, value: string, ttl?: number) {
-    return this.cache.set(
+    return this.cacheAdapter.set(
       key,
       value,
       ttl ?? this.configurationService.get('CACHE_TTL')

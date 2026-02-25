@@ -50,6 +50,7 @@ describe('AgentController (integration)', () => {
   }
 
   beforeEach(async () => {
+    process.env.ENABLE_FEATURE_AGENT_LANGGRAPH = 'false';
     controller = await buildModule(
       new TestPortfolioService(makeTestHoldings())
     );

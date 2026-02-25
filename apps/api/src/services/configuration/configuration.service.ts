@@ -21,6 +21,18 @@ export class ConfigurationService {
 
   public constructor() {
     this.environmentConfiguration = cleanEnv(process.env, {
+      AGENT_ANTHROPIC_MODEL: str({ default: 'claude-3-5-sonnet-latest' }),
+      AGENT_MAX_GRAPH_STEPS: num({ default: 4 }),
+      AGENT_MEMORY_MAX_MESSAGES: num({ default: 40 }),
+      AGENT_MEMORY_RECENT_MESSAGES: num({ default: 12 }),
+      AGENT_MEMORY_TTL_SECONDS: num({ default: 604800 }),
+      AGENT_MODEL_TIMEOUT_MS: num({ default: 12000 }),
+      ANTHROPIC_API_KEY: str({
+        default: undefined,
+        requiredWhen: (env) => {
+          return env.ENABLE_FEATURE_AGENT_LANGGRAPH === true;
+        }
+      }),
       ACCESS_TOKEN_SALT: str(),
       API_KEY_ALPHA_VANTAGE: str({ default: '' }),
       API_KEY_BETTER_UPTIME: str({ default: '' }),
@@ -41,6 +53,7 @@ export class ConfigurationService {
         default: []
       }),
       ENABLE_FEATURE_AUTH_GOOGLE: bool({ default: false }),
+      ENABLE_FEATURE_AGENT_LANGGRAPH: bool({ default: false }),
       ENABLE_FEATURE_AUTH_OIDC: bool({ default: false }),
       ENABLE_FEATURE_AUTH_TOKEN: bool({ default: true }),
       ENABLE_FEATURE_FEAR_AND_GREED_INDEX: bool({ default: false }),

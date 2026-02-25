@@ -34,6 +34,7 @@ describe('Agent Memory & Error Behavior (Layer 3)', () => {
   }
 
   beforeEach(async () => {
+    process.env.ENABLE_FEATURE_AGENT_LANGGRAPH = 'false';
     controller = await buildController(
       new TestPortfolioService(makeTestHoldings())
     );

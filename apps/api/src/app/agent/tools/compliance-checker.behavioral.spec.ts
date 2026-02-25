@@ -42,6 +42,7 @@ describe('ESG Compliance — Behavioral Tests (Layer 3)', () => {
   }
 
   beforeEach(() => {
+    process.env.ENABLE_FEATURE_AGENT_LANGGRAPH = 'false';
     service = buildService(new TestPortfolioService(makeTestHoldings()));
   });
 

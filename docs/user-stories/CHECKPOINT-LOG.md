@@ -1,0 +1,17 @@
+# Phase 1 / Phase 2 Checkpoint Log
+
+| Story  | Commit      | Ghostfolio URL | Local Validation | TDD Evidence | User Checkpoint | Status | Notes |
+| ------ | ----------- | -------------- | ---------------- | ------------ | --------------- | ------ | ----- |
+| US-002 | f580871 | `https://ghostfolio-production-e8d1.up.railway.app` | N/A (infra) | N/A (infra) | Passed | `done` | Ghostfolio deployed. 7 holdings seeded (AAPL, MSFT, GOOGL, BND, VWO, BTC-USD, XOM). Yahoo Finance non-functional on Railway — used MANUAL data source. Migrated to faithful-youthfulness Railway project. |
+| US-003 | ea112a42f | `https://ghostfolio-production-e8d1.up.railway.app` | 5/5 tests pass | Red→Green confirmed | Passed | `done` | Agent NestJS module + market_data_fetch tool + Angular chat UI. MVP uses pattern matching (LangGraph deferred). Replaced yahoo-finance2 with direct fetch API. Migrated to faithful-youthfulness Railway project. |
+| US-004 | f54d58a4e | `https://ghostfolio-production-e8d1.up.railway.app` | 26/26 tests pass | Red→Green confirmed | Passed | `done` | Portfolio risk analysis tool: concentration (HHI), allocation by asset class, performance summary. Routes via keyword matching. PortfolioService injected via NestJS DI. Auth fix: JWT-based user identity (`AuthGuard('jwt')` + `@Inject(REQUEST)` → `request.user.id`). No PrismaService — userId flows from JWT → controller → service → tool. |
+| US-005 | f54d58a4e | `https://ghostfolio-production-e8d1.up.railway.app` | Included in US-004 test run | Red→Green confirmed | Passed | `done` | ESG compliance checker with static dataset (25 tickers). Compliance score, violations by category, filtering. Auth fix: `handleComplianceQuestion` receives userId from JWT, not database lookup. Deployed alongside US-004. |
+| US-006 | Uncommitted | | | | Pending | `in-review` | Session memory (in-memory Map) and classified error handling. Story doc shows implementation in review. |
+| US-007 | Uncommitted | | | | Pending | `todo` | Consolidated eval suite (≥12 cases), MVP evidence document, production gate. |
+| US-008 | Uncommitted | `https://ghostfolio-production-e8d1.up.railway.app/en/agent` | Agent suites + story-focused Nx tests + `nx build api` + full `nx test api` pass | Red→Green confirmed (graph + deterministic fallback + memory tests) | Pending | `done` | LangGraph orchestration, deterministic fallback, full Redis-backed session memory with bounded summarization, and tracing metadata wired. Validation command updated to `--testPathPatterns` (plural), `TZ=UTC` set in `.env.example`, and `cache-manager` peer dependency resolved. |
+| US-009 | Uncommitted | | | | Pending | `todo` | Add 3+ verification systems (cross-source checks, confidence scoring, output validation, source attribution). |
+| US-010 | Uncommitted | | | | Pending | `todo` | Add observability depth: latency breakdown, token usage, tool success rate, user feedback loop. |
+| US-011 | Uncommitted | | | | Pending | `todo` | Resolve API/client build failures and enforce release-green CI gate. |
+| US-012 | Uncommitted | | | | Pending | `todo` | Align agent UI parsing/rendering to real backend tool payload contracts and error states. |
+| US-014 | Uncommitted | | | | Pending | `todo` | Expand eval suite to 50+ cases including adversarial and multi-step scenarios with category coverage gates. |
+| US-013 | Uncommitted | | | | Pending | `todo` | Final MVP+Core evidence closure and sign-off document with production proof and command outputs. |

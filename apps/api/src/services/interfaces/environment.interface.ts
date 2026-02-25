@@ -1,6 +1,13 @@
 import { CleanedEnvAccessors } from 'envalid';
 
 export interface Environment extends CleanedEnvAccessors {
+  AGENT_ANTHROPIC_MODEL: string;
+  AGENT_MAX_GRAPH_STEPS: number;
+  AGENT_MEMORY_MAX_MESSAGES: number;
+  AGENT_MEMORY_RECENT_MESSAGES: number;
+  AGENT_MEMORY_TTL_SECONDS: number;
+  AGENT_MODEL_TIMEOUT_MS: number;
+  ANTHROPIC_API_KEY: string;
   ACCESS_TOKEN_SALT: string;
   API_KEY_ALPHA_VANTAGE: string;
   API_KEY_BETTER_UPTIME: string;
@@ -16,6 +23,7 @@ export interface Environment extends CleanedEnvAccessors {
   DATA_SOURCE_IMPORT: string;
   DATA_SOURCES: string[];
   DATA_SOURCES_GHOSTFOLIO_DATA_PROVIDER: string[];
+  ENABLE_FEATURE_AGENT_LANGGRAPH: boolean;
   ENABLE_FEATURE_AUTH_GOOGLE: boolean;
   ENABLE_FEATURE_AUTH_OIDC: boolean;
   ENABLE_FEATURE_AUTH_TOKEN: boolean;
