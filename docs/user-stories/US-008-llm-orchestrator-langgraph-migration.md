@@ -100,3 +100,8 @@ npx dotenv-cli -e .env.example -- npx nx test api
   - Added `TZ=UTC` to `.env.example` to prevent timezone-driven API test flakiness.
   - Added explicit `cache-manager` dependency to satisfy `@nestjs/cache-manager` peer resolution.
   - Node 22.18+ is still required for release parity and production deployment.
+  - 2026-02-25 regression patch:
+    - Deterministic fallback now handles combined risk + ESG prompts in one response with 2 tool calls.
+    - ESG follow-up prompts now support impact ranking and remove-worst/remove-all hypothetical score simulation.
+    - Portfolio response now includes explicit `High|Medium|Low` risk label.
+    - Graph fallback usage is now explicit in user response text and warning logs to avoid silent mode ambiguity.

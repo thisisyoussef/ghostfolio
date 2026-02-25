@@ -247,6 +247,38 @@ describe('AgentService — Behavioral Tests (Layer 3)', () => {
     expect(toolArgs.filterCategory).toBe('fossil_fuels');
   });
 
+  it('should answer combined risk + ESG request in deterministic mode with two tool calls', async () => {
+    const result = await service.chat({
+      message: 'How risky am I and is it ESG compliant?',
+      sessionId: TEST_SESSION,
+      userId: TEST_USER_ID
+    });
+
+    expect(result.toolCalls).toHaveLength(2);
+    expect(result.toolCalls[0].name).toBe('portfolio_risk_analysis');
+    expect(result.toolCalls[1].name).toBe('compliance_check');
+    expect(result.response).toContain('Combined Portfolio Risk + ESG Review');
+  });
+
+  it('should keep ESG follow-up context for hypothetical remove-all question', async () => {
+    await service.chat({
+      message: 'Is my portfolio ESG compliant?',
+      sessionId: TEST_SESSION,
+      userId: TEST_USER_ID
+    });
+
+    const result = await service.chat({
+      message:
+        'Given all three violations are rated high, what would my score be if all of them were removed?',
+      sessionId: TEST_SESSION,
+      userId: TEST_USER_ID
+    });
+
+    expect(result.toolCalls).toHaveLength(1);
+    expect(result.toolCalls[0].name).toBe('compliance_check');
+    expect(result.response).toContain('Hypothetical Scenario');
+  });
+
   it('should support multi-step tool chain in one turn when graph mode is enabled', async () => {
     process.env.ENABLE_FEATURE_AGENT_LANGGRAPH = 'true';
 
@@ -368,6 +400,7 @@ describe('AgentService — Behavioral Tests (Layer 3)', () => {
 
     expect(graphChat).toHaveBeenCalled();
     expect(deterministicChat).toHaveBeenCalled();
-    expect(result.response).toBe('Deterministic fallback response.');
+    expect(result.response).toContain('Deterministic fallback response.');
+    expect(result.response).toContain('deterministic fallback mode');
   });
 });

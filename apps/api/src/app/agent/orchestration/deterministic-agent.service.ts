@@ -6,7 +6,10 @@ import { traceable } from 'langsmith/traceable';
 import { type ChatResponse, type ToolCallInfo } from '../agent.types';
 import { AgentError, ErrorType } from '../errors/agent-error';
 import { SessionMemoryService } from '../memory/session-memory.service';
-import { complianceCheck } from '../tools/compliance-checker.tool';
+import {
+  complianceCheck,
+  type ComplianceCheckOutput
+} from '../tools/compliance-checker.tool';
 import { marketDataFetch } from '../tools/market-data.tool';
 import { portfolioRiskAnalysis } from '../tools/portfolio-analysis.tool';
 
@@ -23,6 +26,11 @@ const ESG_KEYWORDS = [
   'gambling',
   'controversial',
   'labor',
+  'violation',
+  'offender',
+  'impact',
+  'flagged',
+  'score change',
   'sin stock',
   'green invest',
   'socially responsible'
@@ -42,6 +50,21 @@ const PORTFOLIO_KEYWORDS = [
   'performance',
   'return',
   'invested'
+];
+
+const RISK_INTENT_KEYWORDS = [
+  'risk',
+  'risky',
+  'concentration',
+  'diversif',
+  'hhi',
+  'herfindahl',
+  'allocation',
+  'performance',
+  'return',
+  'high risk',
+  'medium risk',
+  'low risk'
 ];
 
 const COMMON_SYMBOL_FALSE_POSITIVES = new Set([
@@ -104,6 +127,44 @@ export function isPortfolioQuestion(message: string): boolean {
   return PORTFOLIO_KEYWORDS.some((keyword) => lower.includes(keyword));
 }
 
+function isRiskIntentQuestion(message: string): boolean {
+  const lower = message.toLowerCase();
+  return RISK_INTENT_KEYWORDS.some((keyword) => lower.includes(keyword));
+}
+
+function roundTwo(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+function parseEsgIntent(message: string): {
+  asksImpactRanking: boolean;
+  asksRemovalScenario: boolean;
+  asksRemoveAll: boolean;
+  asksRemoveWorst: boolean;
+} {
+  const lower = message.toLowerCase();
+  const asksImpactRanking =
+    /(biggest|largest|worst|highest|most)/.test(lower) &&
+    /(impact|offender|violation|flagged|negative)/.test(lower);
+  const asksRemovalScenario =
+    /(remove|removed|sell|sold|without|exclude)/.test(lower) &&
+    /(offender|violation|flagged|score|them|all)/.test(lower);
+  const asksRemoveAll =
+    asksRemovalScenario &&
+    /(all(\s+three)?\s+(violations|offenders)|all of them|them all|all flagged)/.test(
+      lower
+    );
+  const asksRemoveWorst =
+    asksRemovalScenario && /(worst|biggest|largest|top)/.test(lower);
+
+  return {
+    asksImpactRanking,
+    asksRemovalScenario,
+    asksRemoveAll,
+    asksRemoveWorst
+  };
+}
+
 export function detectCategoryFilter(message: string): string | undefined {
   const lower = message.toLowerCase();
   const categoryMap: Record<string, string> = {
@@ -156,11 +217,22 @@ export class DeterministicAgentService {
       };
     }
 
-    if (isEsgQuestion(message)) {
+    const isEsg = isEsgQuestion(message);
+    const isPortfolio = isPortfolioQuestion(message);
+
+    if (isEsg && isRiskIntentQuestion(message)) {
+      return this.handleCombinedRiskAndComplianceQuestion(
+        message,
+        sessionId,
+        userId
+      );
+    }
+
+    if (isEsg) {
       return this.handleComplianceQuestion(message, sessionId, userId);
     }
 
-    if (isPortfolioQuestion(message)) {
+    if (isPortfolio) {
       return this.handlePortfolioQuestion(message, sessionId, userId);
     }
 
@@ -195,6 +267,59 @@ export class DeterministicAgentService {
     );
 
     return traceableMarketData({ symbols });
+  }
+
+  private async handleCombinedRiskAndComplianceQuestion(
+    message: string,
+    sessionId: string,
+    userId: string
+  ): Promise<ChatResponse> {
+    const [portfolioResult, complianceResult] = await Promise.all([
+      this.handlePortfolioQuestion(message, sessionId, userId),
+      this.handleComplianceQuestion(message, sessionId, userId)
+    ]);
+
+    const sections: string[] = [
+      '### 🔎 Combined Portfolio Risk + ESG Review',
+      '',
+      portfolioResult.response,
+      '',
+      complianceResult.response
+    ];
+    const toolCalls = [
+      ...portfolioResult.toolCalls,
+      ...complianceResult.toolCalls
+    ];
+    const hasError = Boolean(portfolioResult.isError || complianceResult.isError);
+
+    if (portfolioResult.isError) {
+      sections.push(
+        '',
+        '⚠️ Portfolio risk analysis was partially unavailable for this run.'
+      );
+    }
+
+    if (complianceResult.isError) {
+      sections.push(
+        '',
+        '⚠️ ESG compliance analysis was partially unavailable for this run.'
+      );
+    }
+
+    return {
+      ...(hasError
+        ? {
+            errorType:
+              portfolioResult.errorType ||
+              complianceResult.errorType ||
+              ErrorType.SERVICE,
+            isError: true
+          }
+        : {}),
+      response: sections.join('\n'),
+      sessionId,
+      toolCalls
+    };
   }
 
   private async marketDataImpl(
@@ -355,44 +480,12 @@ export class DeterministicAgentService {
       }
     ];
 
-    const parts: string[] = [];
-    const filterLabel = filterCategory
-      ? ` (${filterCategory.replace(/_/g, ' ')})`
-      : '';
-
-    parts.push(`### 🌱 ESG Compliance Report${filterLabel}`);
-    parts.push('');
-    parts.push(`- **Compliance Score:** ${result.complianceScore}%`);
-    parts.push(`- **Holdings checked:** ${result.totalChecked}`);
-    parts.push(
-      `- **Source:** ESG Violations Dataset v${result.datasetVersion} (${result.datasetLastUpdated})`
+    const parts = this.buildComplianceResponseParts(
+      message,
+      holdingInputs,
+      result,
+      filterCategory
     );
-
-    if (result.violations.length > 0) {
-      parts.push('');
-      parts.push('### ⚠️ Violations Found');
-      parts.push('');
-
-      for (const violation of result.violations) {
-        const categories = violation.categories.join(', ').replace(/_/g, ' ');
-        parts.push(
-          `- **${violation.name}** — ${categories} [${violation.severity}]: ${violation.reason}`
-        );
-      }
-    } else {
-      parts.push('');
-      parts.push('✅ No ESG violations found in your portfolio.');
-    }
-
-    if (result.cleanHoldings.length > 0 && result.violations.length > 0) {
-      parts.push('');
-      parts.push('### ✅ Clean Holdings');
-      parts.push('');
-
-      for (const holding of result.cleanHoldings) {
-        parts.push(`- ${holding.name}`);
-      }
-    }
 
     return {
       response: parts.join('\n'),
@@ -465,6 +558,12 @@ export class DeterministicAgentService {
         `- **Top holding:** ${concentration.topHoldingSymbol} at ${concentration.topHoldingPercent}%`
       );
       parts.push(`- **Diversification:** ${concentration.diversificationLevel}`);
+      parts.push(
+        `- **Overall risk level:** ${this.classifyRiskLevel(
+          concentration.herfindahlIndex,
+          concentration.topHoldingPercent
+        )}`
+      );
 
       if (concentration.topHoldings.length > 1) {
         parts.push('');
@@ -582,5 +681,144 @@ export class DeterministicAgentService {
       (symbol) =>
         !COMMON_SYMBOL_FALSE_POSITIVES.has(symbol) && symbol.length >= 2
     );
+  }
+
+  private buildComplianceResponseParts(
+    message: string,
+    holdingInputs: {
+      symbol: string;
+      name: string;
+      valueInBaseCurrency: number;
+    }[],
+    result: ComplianceCheckOutput,
+    filterCategory?: string
+  ): string[] {
+    const parts: string[] = [];
+    const filterLabel = filterCategory
+      ? ` (${filterCategory.replace(/_/g, ' ')})`
+      : '';
+    const intent = parseEsgIntent(message);
+    const hasViolations = result.violations.length > 0;
+    const ranking = [...result.violations].sort(
+      (left, right) => right.valueInBaseCurrency - left.valueInBaseCurrency
+    );
+    const totalValue = holdingInputs.reduce((sum, holding) => {
+      return sum + holding.valueInBaseCurrency;
+    }, 0);
+    const violatedValue = ranking.reduce((sum, violation) => {
+      return sum + violation.valueInBaseCurrency;
+    }, 0);
+
+    parts.push(`### 🌱 ESG Compliance Report${filterLabel}`);
+    parts.push('');
+    parts.push(`- **Compliance Score:** ${result.complianceScore}%`);
+    parts.push(`- **Holdings checked:** ${result.totalChecked}`);
+    parts.push(
+      `- **Source:** ESG Violations Dataset v${result.datasetVersion} (${result.datasetLastUpdated})`
+    );
+
+    if (!hasViolations) {
+      parts.push('');
+      parts.push('✅ No ESG violations found in your portfolio.');
+      return parts;
+    }
+
+    if (intent.asksImpactRanking) {
+      const topViolation = ranking[0];
+      const impactPoints =
+        totalValue <= 0
+          ? 0
+          : roundTwo((topViolation.valueInBaseCurrency / totalValue) * 100);
+
+      parts.push('');
+      parts.push('### 📉 ESG Impact Ranking');
+      parts.push('');
+      parts.push(
+        `- **Biggest negative impact:** ${topViolation.name} (about ${impactPoints} score points).`
+      );
+      parts.push('');
+
+      for (const [index, violation] of ranking.entries()) {
+        const portfolioShare =
+          totalValue <= 0
+            ? 0
+            : roundTwo((violation.valueInBaseCurrency / totalValue) * 100);
+        parts.push(
+          `${index + 1}. ${violation.name} — ${portfolioShare}% of portfolio value`
+        );
+      }
+    }
+
+    if (intent.asksRemovalScenario) {
+      const removedSet = intent.asksRemoveAll
+        ? ranking
+        : intent.asksRemoveWorst
+          ? ranking.slice(0, 1)
+          : [];
+      const removedValue = removedSet.reduce((sum, violation) => {
+        return sum + violation.valueInBaseCurrency;
+      }, 0);
+      const nextViolatedValue = Math.max(0, violatedValue - removedValue);
+      const hypotheticalScore =
+        totalValue <= 0
+          ? 100
+          : roundTwo(((totalValue - nextViolatedValue) / totalValue) * 100);
+      const delta = roundTwo(hypotheticalScore - result.complianceScore);
+
+      parts.push('');
+      parts.push('### 🧮 Hypothetical Scenario');
+      parts.push('');
+
+      if (removedSet.length === 0) {
+        parts.push(
+          '- I can recalculate scenarios for removing the worst offender or all flagged offenders.'
+        );
+      } else {
+        const removedNames = removedSet.map((violation) => violation.name).join(', ');
+        parts.push(
+          `- If removed (${removedNames}), your estimated compliance score would be **${hypotheticalScore}%** (${delta >= 0 ? '+' : ''}${delta} points).`
+        );
+      }
+    }
+
+    if (!intent.asksImpactRanking && !intent.asksRemovalScenario) {
+      parts.push('');
+      parts.push('### ⚠️ Violations Found');
+      parts.push('');
+
+      for (const violation of ranking) {
+        const categories = violation.categories.join(', ').replace(/_/g, ' ');
+        parts.push(
+          `- **${violation.name}** — ${categories} [${violation.severity}]: ${violation.reason}`
+        );
+      }
+
+      if (result.cleanHoldings.length > 0) {
+        parts.push('');
+        parts.push('### ✅ Clean Holdings');
+        parts.push('');
+
+        for (const holding of result.cleanHoldings) {
+          parts.push(`- ${holding.name}`);
+        }
+      }
+    }
+
+    return parts;
+  }
+
+  private classifyRiskLevel(
+    herfindahlIndex: number,
+    topHoldingPercent: number
+  ): 'High' | 'Low' | 'Medium' {
+    if (herfindahlIndex >= 0.35 || topHoldingPercent >= 35) {
+      return 'High';
+    }
+
+    if (herfindahlIndex >= 0.2 || topHoldingPercent >= 20) {
+      return 'Medium';
+    }
+
+    return 'Low';
   }
 }

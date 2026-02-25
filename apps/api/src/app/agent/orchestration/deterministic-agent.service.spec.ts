@@ -75,6 +75,49 @@ describe('DeterministicAgentService', () => {
     expect(response.response).toContain('ESG Compliance Report');
   });
 
+  it('should run both portfolio and ESG tools for combined question', async () => {
+    const response = await service.chat({
+      message: 'How risky am I and is it ESG compliant?',
+      sessionId: TEST_SESSION,
+      userId: TEST_USER
+    });
+
+    expect(response.toolCalls).toHaveLength(2);
+    expect(response.toolCalls.map((toolCall) => toolCall.name)).toEqual([
+      'portfolio_risk_analysis',
+      'compliance_check'
+    ]);
+    expect(response.response).toContain('Combined Portfolio Risk + ESG Review');
+  });
+
+  it('should rank ESG offenders when user asks for biggest impact', async () => {
+    const response = await service.chat({
+      message:
+        'Which of my flagged holdings has the biggest negative impact on my ESG score?',
+      sessionId: TEST_SESSION,
+      userId: TEST_USER
+    });
+
+    expect(response.toolCalls).toHaveLength(1);
+    expect(response.toolCalls[0].name).toBe('compliance_check');
+    expect(response.response).toContain('ESG Impact Ranking');
+    expect(response.response).toContain('Biggest negative impact');
+  });
+
+  it('should estimate ESG score change for remove-all hypothetical', async () => {
+    const response = await service.chat({
+      message:
+        'Given all three violations are rated high, what would my score be if all of them were removed?',
+      sessionId: TEST_SESSION,
+      userId: TEST_USER
+    });
+
+    expect(response.toolCalls).toHaveLength(1);
+    expect(response.toolCalls[0].name).toBe('compliance_check');
+    expect(response.response).toContain('Hypothetical Scenario');
+    expect(response.response).toContain('estimated compliance score would be');
+  });
+
   it('should return help text for out-of-scope question', async () => {
     const response = await service.chat({
       message: 'write me a poem',

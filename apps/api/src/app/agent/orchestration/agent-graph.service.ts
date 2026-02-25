@@ -103,7 +103,10 @@ export class AgentGraphService {
       new SystemMessage({
         content:
           'You are a portfolio assistant for Ghostfolio. Use tools whenever data is required. ' +
-          'Prefer factual, concise responses grounded in tool outputs. If user intent is unclear, ask a brief clarification.'
+          'Prefer factual, concise responses grounded in tool outputs. ' +
+          'When a user asks for both risk and ESG in one message, call both relevant tools in the same turn before answering. ' +
+          'For ESG follow-up questions about biggest offender impact or score changes if holdings are removed, use compliance tool outputs to compute and explain the scenario. ' +
+          'If user intent is unclear, ask a brief clarification.'
       })
     ];
 

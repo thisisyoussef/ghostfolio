@@ -94,9 +94,17 @@ export class AgentService {
       console.error(`[agent] ${modelError.type} error:`, modelError.userMessage);
 
       try {
+        console.warn(
+          '[agent] graph orchestration failed; switching to deterministic fallback',
+          {
+            sessionId,
+            userHash: this.hashUserId(input.userId)
+          }
+        );
         const fallbackResponse = await this.deterministicAgent.chat(input);
-        await this.persistTurn(input, fallbackResponse);
-        return fallbackResponse;
+        const response = this.withFallbackNotice(fallbackResponse);
+        await this.persistTurn(input, response);
+        return response;
       } catch (fallbackError) {
         const fallback =
           fallbackError instanceof AgentError
@@ -137,7 +145,23 @@ export class AgentService {
     }
 
     try {
-      return Boolean(this.configurationService.get(key as any));
+      const configured = this.configurationService.get(key as any);
+
+      if (typeof configured === 'boolean') {
+        return configured;
+      }
+
+      if (typeof configured === 'string') {
+        const normalized = configured.trim().toLowerCase();
+        if (['1', 'on', 'true', 'yes'].includes(normalized)) {
+          return true;
+        }
+        if (['0', 'false', 'no', 'off'].includes(normalized)) {
+          return false;
+        }
+      }
+
+      return fallback;
     } catch {
       return fallback;
     }
@@ -149,6 +173,20 @@ export class AgentService {
 
   private isGraphEnabled(): boolean {
     return this.getBooleanConfig('ENABLE_FEATURE_AGENT_LANGGRAPH', false);
+  }
+
+  private withFallbackNotice(response: ChatResponse): ChatResponse {
+    const notice =
+      'Note: I had a temporary reasoning-engine issue and answered using deterministic fallback mode.';
+
+    if (response.response.includes(notice)) {
+      return response;
+    }
+
+    return {
+      ...response,
+      response: `${response.response}\n\n${notice}`
+    };
   }
 
   private async persistTurn(
