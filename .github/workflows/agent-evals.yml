@@ -29,7 +29,7 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci
+        run: npm install --legacy-peer-deps
 
       - name: Run agent tests (152 tests)
         run: npx dotenv-cli -e .env.example -- npx nx test api --testPathPatterns="app/agent/" --no-coverage
@@ -50,7 +50,7 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci
+        run: npm install --legacy-peer-deps
 
       - name: Run Tier 1 eval against production
         env:
@@ -73,7 +73,7 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci
+        run: npm install --legacy-peer-deps
 
       - name: Run Tier 2 eval against production
         env:
