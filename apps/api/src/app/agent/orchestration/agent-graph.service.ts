@@ -18,6 +18,10 @@ import {
   SessionMemoryService,
   type SessionMessage
 } from '../memory/session-memory.service';
+import {
+  type AgentTokenUsage,
+  type AgentToolExecutionMetric
+} from '../observability/observability.types';
 import { AgentToolRegistry } from './tool-registry';
 
 const GraphState = Annotation.Root({
@@ -29,7 +33,27 @@ const GraphState = Annotation.Root({
     default: () => 0,
     reducer: (_, right) => right
   }),
+  reasoningMs: Annotation<number>({
+    default: () => 0,
+    reducer: (_, right) => right
+  }),
+  toolMs: Annotation<number>({
+    default: () => 0,
+    reducer: (_, right) => right
+  }),
+  tokenUsage: Annotation<AgentTokenUsage>({
+    default: () => ({
+      inputTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0
+    }),
+    reducer: (_, right) => right
+  }),
   toolCalls: Annotation<ToolCallInfo[]>({
+    default: () => [],
+    reducer: (left, right) => left.concat(right)
+  }),
+  toolExecutions: Annotation<AgentToolExecutionMetric[]>({
     default: () => [],
     reducer: (left, right) => left.concat(right)
   })
@@ -43,6 +67,10 @@ type LlmRunnable = {
 const DEFAULT_MODEL = 'claude-3-5-sonnet-latest';
 const DEFAULT_MAX_STEPS = 4;
 const DEFAULT_TIMEOUT_MS = 12_000;
+const DEFAULT_CONTEXT_BUDGET_BYTES = 14_000;
+const DEFAULT_MESSAGE_CHAR_LIMIT = 1_000;
+const DEFAULT_SUMMARY_CHAR_LIMIT = 2_400;
+const DEFAULT_TOOL_MESSAGE_CHAR_LIMIT = 600;
 
 @Injectable()
 export class AgentGraphService {
@@ -54,10 +82,11 @@ export class AgentGraphService {
 
   public async chat(input: {
     message: string;
+    requestId?: string;
     sessionId: string;
     userId: string;
   }): Promise<ChatResponse> {
-    const { message, sessionId, userId } = input;
+    const { message, requestId, sessionId, userId } = input;
 
     const model = this.buildModel(userId);
     const initialMessages = await this.buildInitialMessages(
@@ -71,20 +100,46 @@ export class AgentGraphService {
       DEFAULT_MAX_STEPS
     );
 
-    const graph = this.buildGraph({ maxSteps, model, userId });
+    const graph = this.buildGraph({ maxSteps, model, requestId, userId });
 
     const initialState: AgentGraphState = {
       messages: initialMessages,
+      reasoningMs: 0,
       stepCount: 0,
-      toolCalls: []
+      tokenUsage: {
+        inputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0
+      },
+      toolCalls: [],
+      toolExecutions: [],
+      toolMs: 0
     };
 
     const state = await graph.invoke(initialState);
     const response = this.extractFinalResponse(state.messages);
+    const tokenUsage = state.tokenUsage || {
+      inputTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0
+    };
+    const reasoningMs = Number(state.reasoningMs) || 0;
+    const toolMs = Number(state.toolMs) || 0;
+    const toolExecutions = state.toolExecutions || [];
 
     return {
       response,
       sessionId,
+      telemetry: {
+        latency: {
+          reasoningMs,
+          toolMs
+        },
+        ...(tokenUsage.totalTokens > 0
+          ? { tokenUsage }
+          : {}),
+        toolExecutions
+      },
       toolCalls: state.toolCalls
     };
   }
@@ -98,30 +153,74 @@ export class AgentGraphService {
       userId,
       sessionId
     );
+    const boundedSummary = this.truncateText(
+      context.summary,
+      DEFAULT_SUMMARY_CHAR_LIMIT
+    );
+    const normalizedRecentMessages = context.recentMessages.map((message) => {
+      return this.normalizeMessageForContext(message);
+    });
 
     const systemSections = [
       'You are a portfolio assistant for Ghostfolio. Use tools whenever data is required. ' +
         'Prefer factual, concise responses grounded in tool outputs. ' +
         'When a user asks for both risk and ESG in one message, call both relevant tools in the same turn before answering. ' +
         'For ESG follow-up questions about biggest offender impact or score changes if holdings are removed, use compliance tool outputs to compute and explain the scenario. ' +
+        'When ESG requests name specific holdings, pass those tickers via compliance_check.symbols so the response is scoped. ' +
+        'For stress tests, expected shortfall, basis-point sensitivity, and breakeven questions, use scenario_analysis. ' +
+        'Never call market_data_fetch unless you have explicit ticker symbols. Never treat words like "add", "both", or "yes" as symbols. ' +
         'If user intent is unclear, ask a brief clarification.'
     ];
 
-    if (context.summary) {
-      systemSections.push(`Conversation summary:\n${context.summary}`);
+    if (boundedSummary) {
+      systemSections.push(`Conversation summary:\n${boundedSummary}`);
     }
+
+    const contextAnchors = this.buildContextAnchors(normalizedRecentMessages);
+    if (contextAnchors) {
+      systemSections.push(`Recent context anchors:\n${contextAnchors}`);
+    }
+
+    const systemContent = systemSections.join('\n\n');
+    const budgetForHistory = Math.max(
+      1_500,
+      DEFAULT_CONTEXT_BUDGET_BYTES -
+        this.byteLength(systemContent) -
+        this.byteLength(currentMessage)
+    );
+    const boundedRecentMessages = this.selectRecentMessagesWithinBudget(
+      normalizedRecentMessages,
+      budgetForHistory
+    );
 
     const messages: BaseMessage[] = [
       new SystemMessage({
-        content: systemSections.join('\n\n')
+        content: systemContent
       })
     ];
 
-    for (const historyMessage of context.recentMessages) {
+    for (const historyMessage of boundedRecentMessages) {
       messages.push(this.toModelMessage(historyMessage));
     }
 
     messages.push(new HumanMessage({ content: currentMessage }));
+
+    const toolPayloadBytes = boundedRecentMessages
+      .filter((message) => message.role === 'tool')
+      .reduce((sum, message) => {
+        return sum + this.byteLength(message.content);
+      }, 0);
+
+    this.logContextPreflight({
+      contextBytes: this.computeMessageBytes(messages),
+      droppedMessages:
+        normalizedRecentMessages.length - boundedRecentMessages.length,
+      messageCount: messages.length,
+      sessionId,
+      summaryBytes: this.byteLength(boundedSummary),
+      toolPayloadBytes,
+      userHash: this.hashUserId(userId)
+    });
 
     return messages;
   }
@@ -129,19 +228,20 @@ export class AgentGraphService {
   private buildGraph(args: {
     maxSteps: number;
     model: LlmRunnable;
+    requestId?: string;
     userId: string;
   }) {
-    const { maxSteps, model, userId } = args;
+    const { maxSteps, model, requestId, userId } = args;
 
     const workflow = new StateGraph(GraphState)
       .addNode('reason', async (state: AgentGraphState) => {
-        return this.reasonNode(state, model, userId);
+        return this.reasonNode(state, model, userId, requestId);
       })
       .addNode('tool', async (state: AgentGraphState) => {
-        return this.toolNode(state, userId);
+        return this.toolNode(state, userId, requestId);
       })
       .addNode('respond', async (state: AgentGraphState) => {
-        return this.respondNode(state, maxSteps);
+        return this.respondNode(state, maxSteps, requestId);
       })
       .addEdge(START, 'reason')
       .addConditionalEdges(
@@ -283,12 +383,14 @@ export class AgentGraphService {
   private async reasonNode(
     state: AgentGraphState,
     model: LlmRunnable,
-    userId: string
+    userId: string,
+    requestId?: string
   ): Promise<Partial<AgentGraphState>> {
     const timeoutMs = this.getNumberConfig(
       'AGENT_MODEL_TIMEOUT_MS',
       DEFAULT_TIMEOUT_MS
     );
+    const startedAt = Date.now();
 
     const reasonSpan = traceable(
       async () => {
@@ -312,6 +414,7 @@ export class AgentGraphService {
       {
         metadata: {
           orchestrator: 'langgraph',
+          request_id: requestId || 'unknown',
           user_id: this.hashUserId(userId)
         },
         name: 'agent_reason',
@@ -321,10 +424,14 @@ export class AgentGraphService {
 
     try {
       const aiMessage = await reasonSpan();
+      const elapsedMs = Math.max(0, Date.now() - startedAt);
+      const tokenUsage = this.extractTokenUsage(aiMessage);
 
       return {
         messages: [aiMessage],
-        stepCount: state.stepCount + 1
+        reasoningMs: state.reasoningMs + elapsedMs,
+        stepCount: state.stepCount + 1,
+        tokenUsage: this.mergeTokenUsage(state.tokenUsage, tokenUsage)
       };
     } catch (error) {
       if (error instanceof AgentError) {
@@ -347,7 +454,8 @@ export class AgentGraphService {
 
   private async respondNode(
     state: AgentGraphState,
-    maxSteps: number
+    maxSteps: number,
+    requestId?: string
   ): Promise<Partial<AgentGraphState>> {
     const respondSpan = traceable(
       async () => {
@@ -372,6 +480,10 @@ export class AgentGraphService {
         return {};
       },
       {
+        metadata: {
+          orchestrator: 'langgraph',
+          request_id: requestId || 'unknown'
+        },
         name: 'agent_respond',
         run_type: 'chain'
       }
@@ -382,7 +494,8 @@ export class AgentGraphService {
 
   private async toolNode(
     state: AgentGraphState,
-    userId: string
+    userId: string,
+    requestId?: string
   ): Promise<Partial<AgentGraphState>> {
     const lastMessage = state.messages[state.messages.length - 1];
 
@@ -392,10 +505,47 @@ export class AgentGraphService {
 
     const toolMessages: BaseMessage[] = [];
     const executedCalls: ToolCallInfo[] = [];
+    const executionMetrics: AgentToolExecutionMetric[] = [];
+    const cachedExecutions = new Map<
+      string,
+      {
+        errorType?: ErrorType;
+        isError: boolean;
+        serializedResult: string;
+      }
+    >();
+    let totalToolMs = 0;
 
     for (const toolCall of lastMessage.tool_calls) {
       const toolName = toolCall.name;
       const toolArgs = (toolCall.args || {}) as Record<string, unknown>;
+      const cacheKey = `${toolName}:${this.serializeToolArgs(toolArgs)}`;
+      const cachedExecution = cachedExecutions.get(cacheKey);
+
+      if (cachedExecution) {
+        executedCalls.push({
+          args: toolArgs,
+          name: toolName,
+          result: cachedExecution.serializedResult
+        });
+        executionMetrics.push({
+          ...(cachedExecution.errorType
+            ? { errorType: cachedExecution.errorType }
+            : {}),
+          latencyMs: 0,
+          name: toolName,
+          success: !cachedExecution.isError
+        });
+        toolMessages.push(
+          new ToolMessage({
+            content: cachedExecution.serializedResult,
+            tool_call_id: String(toolCall.id || toolName)
+          })
+        );
+        continue;
+      }
+
+      const startedAt = Date.now();
 
       const toolSpan = traceable(
         async () => {
@@ -407,21 +557,28 @@ export class AgentGraphService {
             );
 
             return {
+              errorType: undefined,
               isError: false,
               payload: result
             };
           } catch (error) {
-            const message =
+            const classifiedError =
               error instanceof AgentError
-                ? error.userMessage
-                : error instanceof Error
-                  ? error.message
-                  : String(error);
+                ? error
+                : new AgentError(
+                    ErrorType.TOOL,
+                    error instanceof Error
+                      ? error.message
+                      : 'Tool execution failed.',
+                    true,
+                    error instanceof Error ? error : undefined
+                  );
 
             return {
+              errorType: classifiedError.type,
               isError: true,
               payload: {
-                error: message
+                error: classifiedError.userMessage
               }
             };
           }
@@ -429,6 +586,7 @@ export class AgentGraphService {
         {
           metadata: {
             orchestrator: 'langgraph',
+            request_id: requestId || 'unknown',
             user_id: this.hashUserId(userId)
           },
           name: toolName,
@@ -437,12 +595,25 @@ export class AgentGraphService {
       );
 
       const toolResult = await toolSpan();
+      const elapsedMs = Math.max(0, Date.now() - startedAt);
       const serializedResult = JSON.stringify(toolResult.payload);
+      totalToolMs += elapsedMs;
+      cachedExecutions.set(cacheKey, {
+        ...(toolResult.errorType ? { errorType: toolResult.errorType } : {}),
+        isError: toolResult.isError,
+        serializedResult
+      });
 
       executedCalls.push({
         args: toolArgs,
         name: toolName,
         result: serializedResult
+      });
+      executionMetrics.push({
+        ...(toolResult.errorType ? { errorType: toolResult.errorType } : {}),
+        latencyMs: elapsedMs,
+        name: toolName,
+        success: !toolResult.isError
       });
 
       toolMessages.push(
@@ -455,8 +626,74 @@ export class AgentGraphService {
 
     return {
       messages: toolMessages,
-      toolCalls: executedCalls
+      toolCalls: executedCalls,
+      toolExecutions: executionMetrics,
+      toolMs: state.toolMs + totalToolMs
     };
+  }
+
+  private serializeToolArgs(args: Record<string, unknown>): string {
+    try {
+      return JSON.stringify(args);
+    } catch {
+      return '[unserializable-tool-args]';
+    }
+  }
+
+  private mergeTokenUsage(
+    current: AgentTokenUsage,
+    incoming: AgentTokenUsage
+  ): AgentTokenUsage {
+    return {
+      inputTokens: current.inputTokens + incoming.inputTokens,
+      outputTokens: current.outputTokens + incoming.outputTokens,
+      totalTokens: current.totalTokens + incoming.totalTokens
+    };
+  }
+
+  private extractTokenUsage(message: AIMessage): AgentTokenUsage {
+    const candidate = message as unknown as {
+      response_metadata?: {
+        usage?: Record<string, unknown>;
+      };
+      usage_metadata?: Record<string, unknown>;
+    };
+
+    const usage = candidate.usage_metadata || candidate.response_metadata?.usage;
+    if (!usage) {
+      return {
+        inputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0
+      };
+    }
+
+    const inputTokens = this.toTokenNumber(
+      usage.input_tokens ?? usage.inputTokens
+    );
+    const outputTokens = this.toTokenNumber(
+      usage.output_tokens ?? usage.outputTokens
+    );
+    const totalTokensRaw = this.toTokenNumber(
+      usage.total_tokens ?? usage.totalTokens
+    );
+    const totalTokens =
+      totalTokensRaw > 0 ? totalTokensRaw : inputTokens + outputTokens;
+
+    return {
+      inputTokens,
+      outputTokens,
+      totalTokens
+    };
+  }
+
+  private toTokenNumber(value: unknown): number {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      return 0;
+    }
+
+    return parsed;
   }
 
   private toModelMessage(message: SessionMessage): BaseMessage {
@@ -482,6 +719,153 @@ export class AgentGraphService {
       default:
         return new HumanMessage({ content: message.content });
     }
+  }
+
+  private normalizeMessageForContext(message: SessionMessage): SessionMessage {
+    const maxLength =
+      message.role === 'tool'
+        ? DEFAULT_TOOL_MESSAGE_CHAR_LIMIT
+        : DEFAULT_MESSAGE_CHAR_LIMIT;
+    const normalizedContent =
+      message.role === 'tool'
+        ? message.toolResultSummary || message.content
+        : message.content;
+
+    return {
+      ...message,
+      content: this.truncateText(normalizedContent, maxLength),
+      ...(message.toolResultSummary
+        ? {
+            toolResultSummary: this.truncateText(
+              message.toolResultSummary,
+              DEFAULT_TOOL_MESSAGE_CHAR_LIMIT
+            )
+          }
+        : {})
+    };
+  }
+
+  private selectRecentMessagesWithinBudget(
+    messages: SessionMessage[],
+    budgetBytes: number
+  ): SessionMessage[] {
+    const selected: SessionMessage[] = [];
+    let usedBytes = 0;
+
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = messages[index];
+      const messageBytes =
+        this.byteLength(message.content) + this.byteLength(message.role) + 12;
+
+      if (usedBytes + messageBytes > budgetBytes && selected.length > 0) {
+        continue;
+      }
+
+      if (usedBytes + messageBytes > budgetBytes && selected.length === 0) {
+        selected.unshift({
+          ...message,
+          content: this.truncateText(message.content, 240)
+        });
+        break;
+      }
+
+      selected.unshift(message);
+      usedBytes += messageBytes;
+    }
+
+    return selected;
+  }
+
+  private buildContextAnchors(messages: SessionMessage[]): string {
+    if (messages.length === 0) {
+      return '';
+    }
+
+    const recent = messages.slice(-12);
+    const recentTools = Array.from(
+      new Set(
+        recent
+          .filter((message) => message.role === 'tool')
+          .map((message) => String(message.toolName || '').trim())
+          .filter(Boolean)
+      )
+    );
+
+    const recentTickers = Array.from(
+      new Set(
+        recent.flatMap((message) => {
+          return (message.content.match(/\b[A-Z]{2,5}\b/g) || []).filter(
+            (token) => !['AND', 'THE', 'WITH', 'FROM', 'WHAT', 'THAT'].includes(token)
+          );
+        })
+      )
+    ).slice(0, 12);
+
+    const numericAnchors = recent
+      .flatMap((message) => {
+        return message.content.match(/\b\d+(?:\.\d+)?\s*(?:%|bps|basis points?)?\b/gi) || [];
+      })
+      .slice(0, 20);
+
+    const recentUserIntents = recent
+      .filter((message) => message.role === 'user')
+      .slice(-4)
+      .map((message) => message.content.slice(0, 160));
+
+    return JSON.stringify(
+      {
+        numericAnchors,
+        recentTickers,
+        recentTools,
+        recentUserIntents
+      },
+      null,
+      2
+    );
+  }
+
+  private computeMessageBytes(messages: BaseMessage[]): number {
+    return messages.reduce((sum, message) => {
+      return sum + this.byteLength(this.messageContentToString(message.content));
+    }, 0);
+  }
+
+  private byteLength(value: string): number {
+    return Buffer.byteLength(value || '', 'utf8');
+  }
+
+  private truncateText(value: string, maxChars: number): string {
+    if (!value) {
+      return '';
+    }
+
+    if (value.length <= maxChars) {
+      return value;
+    }
+
+    return `${value.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`;
+  }
+
+  private logContextPreflight(args: {
+    contextBytes: number;
+    droppedMessages: number;
+    messageCount: number;
+    sessionId: string;
+    summaryBytes: number;
+    toolPayloadBytes: number;
+    userHash: string;
+  }): void {
+    console.info(
+      `[agent-graph] context_preflight ${JSON.stringify({
+        context_bytes: args.contextBytes,
+        dropped_messages: args.droppedMessages,
+        message_count: args.messageCount,
+        session_id: args.sessionId,
+        summary_bytes: args.summaryBytes,
+        tool_payload_bytes: args.toolPayloadBytes,
+        user_hash: args.userHash
+      })}`
+    );
   }
 
   private hashUserId(userId: string): string {

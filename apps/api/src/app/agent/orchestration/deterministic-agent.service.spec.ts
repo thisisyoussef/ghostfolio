@@ -120,6 +120,49 @@ describe('DeterministicAgentService', () => {
     expect(response.response).toContain('estimated compliance score would be');
   });
 
+  it('should route stress-test prompts to scenario_analysis', async () => {
+    const response = await service.chat({
+      message: 'Calculate expected shortfall if markets drop 20% tomorrow',
+      sessionId: TEST_SESSION,
+      userId: TEST_USER
+    });
+
+    expect(response.toolCalls).toHaveLength(1);
+    expect(response.toolCalls[0].name).toBe('scenario_analysis');
+    expect(response.response).toContain('Scenario Analysis');
+    expect(response.response).toContain('Estimated shortfall');
+  });
+
+  it('should avoid market_data_fetch misrouting for "add bonds" hypothetical phrasing', async () => {
+    const response = await service.chat({
+      message: 'What if I reduce tech exposure by 15% and add bonds?',
+      sessionId: TEST_SESSION,
+      userId: TEST_USER
+    });
+
+    expect(response.toolCalls).toHaveLength(1);
+    expect(response.toolCalls[0].name).toBe('scenario_analysis');
+    expect(response.toolCalls.map((toolCall) => toolCall.name)).not.toContain(
+      'market_data_fetch'
+    );
+  });
+
+  it('should scope compliance to explicit requested holdings symbols', async () => {
+    const response = await service.chat({
+      message: 'ESG score for ABC and DEF specifically',
+      sessionId: TEST_SESSION,
+      userId: TEST_USER
+    });
+
+    expect(response.toolCalls).toHaveLength(1);
+    expect(response.toolCalls[0].name).toBe('compliance_check');
+    expect(response.toolCalls[0].args).toMatchObject({
+      symbols: ['ABC', 'DEF']
+    });
+    expect(response.response).toContain('Requested holdings:** ABC, DEF');
+    expect(response.response).toContain('Matched in portfolio:** none');
+  });
+
   it('should resolve short "both" follow-up using recent clarification context', async () => {
     await sessionMemory.appendMessages(TEST_USER, TEST_SESSION, [
       {
@@ -147,6 +190,40 @@ describe('DeterministicAgentService', () => {
     ]);
     expect(response.response).not.toContain('I can help you with');
     expect(response.response).toContain('Rebalancing Suggestions');
+  });
+
+  it('should resolve "All of the above." follow-up with punctuation', async () => {
+    await sessionMemory.appendMessages(TEST_USER, TEST_SESSION, [
+      {
+        content:
+          'I need a quick clarification — did you mean risk analysis, ESG impact, or all of the above?',
+        createdAt: Date.now() - 2_000,
+        role: 'assistant'
+      }
+    ]);
+
+    const response = await service.chat({
+      message: 'All of the above.',
+      sessionId: TEST_SESSION,
+      userId: TEST_USER
+    });
+
+    expect(response.toolCalls.map((toolCall) => toolCall.name)).toEqual([
+      'portfolio_risk_analysis',
+      'compliance_check'
+    ]);
+    expect(response.response).not.toContain('I can help you with');
+  });
+
+  it('should route exposure-style risk prompts to portfolio_risk_analysis', async () => {
+    const response = await service.chat({
+      message: 'Oil prices just spiked. How exposed am I?',
+      sessionId: TEST_SESSION,
+      userId: TEST_USER
+    });
+
+    expect(response.toolCalls).toHaveLength(1);
+    expect(response.toolCalls[0].name).toBe('portfolio_risk_analysis');
   });
 
   it('should return help text for out-of-scope question', async () => {

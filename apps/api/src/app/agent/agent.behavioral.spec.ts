@@ -21,6 +21,7 @@ import { AgentError, ErrorType } from './errors/agent-error';
 import { PortfolioService } from '@ghostfolio/api/app/portfolio/portfolio.service';
 import { marketDataFetch } from './tools/market-data.tool';
 import { SessionMemoryService } from './memory/session-memory.service';
+import { AgentObservabilityService } from './observability/agent-observability.service';
 import {
   TestPortfolioService,
   FailingPortfolioService,
@@ -133,6 +134,131 @@ describe('AgentService — Behavioral Tests (Layer 3)', () => {
     // Verify the tool result is stored in tool_calls for traceability
     const toolResult = JSON.parse(result.toolCalls[0].result);
     expect(toolResult.AAPL.price).toBe(195.23);
+  });
+
+  it('should append verification and sources sections for tool-backed responses', async () => {
+    const result = await service.chat({
+      message: 'Is my portfolio ESG compliant?',
+      sessionId: TEST_SESSION,
+      userId: TEST_USER_ID
+    });
+
+    expect(result.response).toContain('### Verification');
+    expect(result.response).toContain('### Sources');
+    expect(result.verification).toBeDefined();
+    expect(result.verification?.confidenceScore).toBeGreaterThanOrEqual(0);
+  });
+
+  it('should increment tool failure counters for failed market tool payloads', async () => {
+    const observability = new AgentObservabilityService();
+    const serviceWithObservability = new AgentService(
+      new TestPortfolioService(makeTestHoldings()) as unknown as PortfolioService,
+      new SessionMemoryService(),
+      undefined,
+      observability
+    );
+
+    mockedMarketDataFetch.mockResolvedValue({
+      AAPL: {
+        error: 'No data returned for AAPL',
+        symbol: 'AAPL'
+      }
+    });
+
+    await serviceWithObservability.chat({
+      message: 'Price of AAPL',
+      sessionId: TEST_SESSION,
+      userId: TEST_USER_ID
+    });
+
+    const metrics = await observability.getMetricsSnapshot();
+    expect(metrics.tools.market_data_fetch.failure).toBeGreaterThanOrEqual(1);
+    expect(metrics.errors.data).toBeGreaterThanOrEqual(1);
+  });
+
+  it('should surface discrepancy warning with downgraded confidence in verification summary', async () => {
+    mockedMarketDataFetch.mockResolvedValue({
+      AAPL: {
+        symbol: 'AAPL',
+        price: 100,
+        sourceAttribution: {
+          primary: {
+            source: 'Yahoo Finance (chart v8)',
+            timestamp: new Date().toISOString()
+          },
+          backup: {
+            source: 'Stooq',
+            timestamp: new Date().toISOString()
+          }
+        },
+        verification: {
+          status: 'warning',
+          confidenceScore: 65,
+          confidenceLevel: 'low',
+          checks: {
+            crossSourcePrice: {
+              passed: false,
+              reason: 'Discrepancy exceeds threshold.'
+            },
+            outputSchema: { passed: true },
+            sourceAttribution: { passed: true }
+          },
+          sources: [
+            {
+              tool: 'market_data_fetch',
+              claim: 'price quote for AAPL',
+              source: 'Yahoo Finance (chart v8)',
+              timestamp: new Date().toISOString()
+            }
+          ],
+          generatedAt: new Date().toISOString()
+        }
+      }
+    } as any);
+
+    const result = await service.chat({
+      message: 'Price of AAPL',
+      sessionId: TEST_SESSION,
+      userId: TEST_USER_ID
+    });
+
+    expect(result.verification?.status).toBe('warning');
+    expect(result.verification?.confidenceLevel).toBe('low');
+    expect(result.response).toContain('WARNING');
+  });
+
+  it('should return controlled data error if tool result JSON cannot be verified', async () => {
+    process.env.ENABLE_FEATURE_AGENT_LANGGRAPH = 'true';
+
+    const invalidToolService = new AgentService(
+      new TestPortfolioService(makeTestHoldings()) as unknown as PortfolioService,
+      new SessionMemoryService()
+    );
+
+    const graphChat = jest.fn().mockResolvedValue({
+      response: 'Invalid tool payload run.',
+      sessionId: TEST_SESSION,
+      toolCalls: [
+        {
+          name: 'market_data_fetch',
+          args: { symbols: ['AAPL'] },
+          result: '{not-json'
+        }
+      ]
+    });
+
+    (invalidToolService as any).graphAgent = { chat: graphChat };
+
+    const result = await invalidToolService.chat({
+      message: 'Price of AAPL',
+      sessionId: TEST_SESSION,
+      userId: TEST_USER_ID
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.errorType).toBe('data');
+    expect(result.response).toContain('could not safely verify');
+    expect(result.response).not.toMatch(/at\s+\w+\s+\(/);
   });
 
   // === Graceful Degradation ===
@@ -279,6 +405,47 @@ describe('AgentService — Behavioral Tests (Layer 3)', () => {
     expect(result.response).toContain('Hypothetical Scenario');
   });
 
+  it('should route expected shortfall prompts to scenario_analysis in deterministic mode', async () => {
+    const result = await service.chat({
+      message: 'Calculate expected shortfall for a 20% market drop',
+      sessionId: TEST_SESSION,
+      userId: TEST_USER_ID
+    });
+
+    expect(result.toolCalls).toHaveLength(1);
+    expect(result.toolCalls[0].name).toBe('scenario_analysis');
+    expect(result.response).not.toContain('I can help you with');
+    expect(result.response).toContain('Scenario Analysis');
+  });
+
+  it('should not misroute "add bonds" hypotheticals to market_data_fetch', async () => {
+    const result = await service.chat({
+      message: 'What if I reduce tech by 15% and add bonds?',
+      sessionId: TEST_SESSION,
+      userId: TEST_USER_ID
+    });
+
+    expect(result.toolCalls.map((toolCall) => toolCall.name)).toEqual([
+      'scenario_analysis'
+    ]);
+    expect(mockedMarketDataFetch).not.toHaveBeenCalled();
+  });
+
+  it('should include explicit capability note for unsupported portfolio metrics', async () => {
+    const result = await service.chat({
+      message:
+        "What's my portfolio correlation with the S&P 500 and Sharpe ratio?",
+      sessionId: TEST_SESSION,
+      userId: TEST_USER_ID
+    });
+
+    expect(result.toolCalls.map((toolCall) => toolCall.name)).toEqual([
+      'portfolio_risk_analysis'
+    ]);
+    expect(result.response).toContain('Capability Note');
+    expect(result.response).toContain('cannot directly compute');
+  });
+
   it('should support multi-step tool chain in one turn when graph mode is enabled', async () => {
     process.env.ENABLE_FEATURE_AGENT_LANGGRAPH = 'true';
 
@@ -318,6 +485,52 @@ describe('AgentService — Behavioral Tests (Layer 3)', () => {
     expect(result.toolCalls).toHaveLength(2);
     expect(result.toolCalls[0].name).toBe('portfolio_risk_analysis');
     expect(result.toolCalls[1].name).toBe('compliance_check');
+  });
+
+  it('should run deterministic second pass when graph returns help menu for in-scope prompt', async () => {
+    process.env.ENABLE_FEATURE_AGENT_LANGGRAPH = 'true';
+
+    const secondPassService = new AgentService(
+      new TestPortfolioService(makeTestHoldings()) as unknown as PortfolioService,
+      new SessionMemoryService()
+    );
+
+    const graphChat = jest.fn().mockResolvedValue({
+      response:
+        'I can help you with:\n- Portfolio risk analysis\n- ESG compliance',
+      sessionId: TEST_SESSION,
+      toolCalls: []
+    });
+    const deterministicChat = jest.fn().mockResolvedValue({
+      response: 'Deterministic in-scope recovery.',
+      sessionId: TEST_SESSION,
+      toolCalls: [
+        {
+          args: { message: 'Oil prices just spiked. How exposed am I?' },
+          name: 'portfolio_risk_analysis',
+          result: '{"concentration":{}}'
+        }
+      ]
+    });
+
+    (secondPassService as any).graphAgent = { chat: graphChat };
+    (secondPassService as any).deterministicAgent = {
+      chat: deterministicChat
+    };
+
+    const result = await secondPassService.chat({
+      message: 'Oil prices just spiked. How exposed am I?',
+      sessionId: TEST_SESSION,
+      userId: TEST_USER_ID
+    });
+
+    expect(graphChat).toHaveBeenCalled();
+    expect(deterministicChat).toHaveBeenCalled();
+    expect(result.toolCalls.map((toolCall) => toolCall.name)).toEqual([
+      'portfolio_risk_analysis'
+    ]);
+    expect(result.response).toContain('Deterministic in-scope recovery.');
+    expect(result.response).not.toContain('deterministic fallback mode');
   });
 
   it('should retain context across five turns in same session', async () => {
@@ -401,7 +614,7 @@ describe('AgentService — Behavioral Tests (Layer 3)', () => {
     expect(graphChat).toHaveBeenCalled();
     expect(deterministicChat).toHaveBeenCalled();
     expect(result.response).toContain('Deterministic fallback response.');
-    expect(result.response).toContain('deterministic fallback mode');
+    expect(result.response).not.toContain('deterministic fallback mode');
   });
 
   it('should handle short "both" follow-up via deterministic fallback without resetting context', async () => {
@@ -450,6 +663,6 @@ describe('AgentService — Behavioral Tests (Layer 3)', () => {
       'compliance_check'
     ]);
     expect(result.response).not.toContain('I can help you with');
-    expect(result.response).toContain('deterministic fallback mode');
+    expect(result.response).not.toContain('deterministic fallback mode');
   });
 });

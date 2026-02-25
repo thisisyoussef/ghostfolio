@@ -6,12 +6,14 @@ import { traceable } from 'langsmith/traceable';
 import { type ChatResponse, type ToolCallInfo } from '../agent.types';
 import { AgentError, ErrorType } from '../errors/agent-error';
 import { SessionMemoryService } from '../memory/session-memory.service';
+import { type AgentToolExecutionMetric } from '../observability/observability.types';
 import {
   complianceCheck,
   type ComplianceCheckOutput
 } from '../tools/compliance-checker.tool';
 import { marketDataFetch } from '../tools/market-data.tool';
 import { portfolioRiskAnalysis } from '../tools/portfolio-analysis.tool';
+import { scenarioAnalysis } from '../tools/scenario-analysis.tool';
 
 const ESG_KEYWORDS = [
   'esg',
@@ -41,7 +43,17 @@ const PORTFOLIO_KEYWORDS = [
   'concentration',
   'allocation',
   'diversif',
+  'exposure',
+  'exposed',
+  'volatility',
   'risk',
+  'sector',
+  'sharpe',
+  'benchmark',
+  'correlation',
+  'hedge',
+  'position',
+  'positions',
   'holdings',
   'asset class',
   'hhi',
@@ -55,6 +67,14 @@ const PORTFOLIO_KEYWORDS = [
 const RISK_INTENT_KEYWORDS = [
   'risk',
   'risky',
+  'volatility',
+  'hedge',
+  'position',
+  'positions',
+  'sector',
+  'correlation',
+  'sharpe',
+  'benchmark',
   'concentration',
   'diversif',
   'hhi',
@@ -67,10 +87,31 @@ const RISK_INTENT_KEYWORDS = [
   'low risk'
 ];
 
+const SCENARIO_KEYWORDS = [
+  'basis points',
+  'basis point',
+  'bps',
+  'breakeven',
+  'drawdown',
+  'expected shortfall',
+  'market correction',
+  'rate cut',
+  'rate hike',
+  'rate sensitivity',
+  'scenario',
+  'shortfall',
+  'stress test',
+  'value at risk',
+  'var',
+  'what if'
+];
+
 const COMMON_SYMBOL_FALSE_POSITIVES = new Set([
+  'ADD',
   'A',
   'ABOUT',
   'ALL',
+  'ABOVE',
   'AN',
   'AND',
   'ARE',
@@ -82,6 +123,7 @@ const COMMON_SYMBOL_FALSE_POSITIVES = new Set([
   'CAN',
   'DATA',
   'DO',
+  'ESG',
   'FOR',
   'GET',
   'GIVE',
@@ -112,6 +154,7 @@ const COMMON_SYMBOL_FALSE_POSITIVES = new Set([
   'THE',
   'TO',
   'UP',
+  'VAR',
   'WAS',
   'WE',
   'WHAT'
@@ -141,6 +184,19 @@ export function isPortfolioQuestion(message: string): boolean {
 function isRiskIntentQuestion(message: string): boolean {
   const lower = message.toLowerCase();
   return RISK_INTENT_KEYWORDS.some((keyword) => lower.includes(keyword));
+}
+
+export function isScenarioQuestion(message: string): boolean {
+  const lower = message.toLowerCase();
+  const lexicalMatch = SCENARIO_KEYWORDS.filter((keyword) => keyword !== 'var').some(
+    (keyword) => lower.includes(keyword)
+  );
+
+  if (lexicalMatch) {
+    return true;
+  }
+
+  return /\bvar\b|\bvalue at risk\b/i.test(message);
 }
 
 function roundTwo(value: number): number {
@@ -215,6 +271,32 @@ export class DeterministicAgentService {
 
   public async chat(input: {
     message: string;
+    requestId?: string;
+    sessionId: string;
+    userId: string;
+  }): Promise<ChatResponse> {
+    const startedAt = Date.now();
+    const response = await this.chatImpl(input);
+
+    const totalMs = Math.max(0, Date.now() - startedAt);
+    const hasToolCalls = response.toolCalls.length > 0;
+    const toolExecutions = this.deriveToolExecutions(response.toolCalls);
+
+    return {
+      ...response,
+      telemetry: {
+        latency: {
+          reasoningMs: hasToolCalls ? 0 : totalMs,
+          toolMs: hasToolCalls ? totalMs : 0
+        },
+        toolExecutions
+      }
+    };
+  }
+
+  private async chatImpl(input: {
+    message: string;
+    requestId?: string;
     sessionId: string;
     userId: string;
   }): Promise<ChatResponse> {
@@ -230,21 +312,51 @@ export class DeterministicAgentService {
 
     const isEsg = isEsgQuestion(message);
     const isPortfolio = isPortfolioQuestion(message);
+    const isScenario = isScenarioQuestion(message);
+
+    if (isEsg && isScenario) {
+      return this.handleCombinedScenarioAndComplianceQuestion(
+        message,
+        sessionId,
+        userId,
+        input.requestId
+      );
+    }
 
     if (isEsg && isRiskIntentQuestion(message)) {
       return this.handleCombinedRiskAndComplianceQuestion(
         message,
         sessionId,
-        userId
+        userId,
+        input.requestId
       );
     }
 
     if (isEsg) {
-      return this.handleComplianceQuestion(message, sessionId, userId);
+      return this.handleComplianceQuestion(
+        message,
+        sessionId,
+        userId,
+        input.requestId
+      );
+    }
+
+    if (isScenario) {
+      return this.handleScenarioQuestion(
+        message,
+        sessionId,
+        userId,
+        input.requestId
+      );
     }
 
     if (isPortfolio) {
-      return this.handlePortfolioQuestion(message, sessionId, userId);
+      return this.handlePortfolioQuestion(
+        message,
+        sessionId,
+        userId,
+        input.requestId
+      );
     }
 
     const continuationIntent = await this.resolveContinuationIntent(
@@ -260,7 +372,8 @@ export class DeterministicAgentService {
         return this.handleCombinedRiskAndComplianceQuestion(
           continuationMessage,
           sessionId,
-          userId
+          userId,
+          input.requestId
         );
       }
 
@@ -268,11 +381,17 @@ export class DeterministicAgentService {
         return this.handleComplianceQuestion(
           continuationMessage,
           sessionId,
-          userId
+          userId,
+          input.requestId
         );
       }
 
-      return this.handlePortfolioQuestion(continuationMessage, sessionId, userId);
+      return this.handlePortfolioQuestion(
+        continuationMessage,
+        sessionId,
+        userId,
+        input.requestId
+      );
     }
 
     const context = await this.resolveContext(message, sessionId, userId);
@@ -284,6 +403,7 @@ export class DeterministicAgentService {
           'I can help you with:\n' +
           '- ESG compliance check (ask about ESG, ethical investing, fossil fuels, etc.)\n' +
           '- Portfolio risk analysis (ask about concentration, allocation, or performance)\n' +
+          '- Scenario analysis (ask about stress tests, shortfall, or rate sensitivity)\n' +
           '- Stock market data (include ticker symbols like AAPL, MSFT)\n\n' +
           'What would you like to know?',
         sessionId,
@@ -291,18 +411,26 @@ export class DeterministicAgentService {
       };
     }
 
-    return this.handleMarketDataQuestion(symbols, sessionId);
+    return this.handleMarketDataQuestion(symbols, sessionId, input.requestId);
   }
 
   private async handleMarketDataQuestion(
     symbols: string[],
-    sessionId: string
+    sessionId: string,
+    requestId?: string
   ): Promise<ChatResponse> {
     const traceableMarketData = traceable(
       async (params: { symbols: string[] }): Promise<ChatResponse> => {
         return this.marketDataImpl(params.symbols, sessionId);
       },
-      { name: 'market_data_fetch', run_type: 'tool' }
+      {
+        metadata: {
+          orchestrator: 'deterministic',
+          request_id: requestId || 'unknown'
+        },
+        name: 'market_data_fetch',
+        run_type: 'tool'
+      }
     );
 
     return traceableMarketData({ symbols });
@@ -311,11 +439,12 @@ export class DeterministicAgentService {
   private async handleCombinedRiskAndComplianceQuestion(
     message: string,
     sessionId: string,
-    userId: string
+    userId: string,
+    requestId?: string
   ): Promise<ChatResponse> {
     const [portfolioResult, complianceResult] = await Promise.all([
-      this.handlePortfolioQuestion(message, sessionId, userId),
-      this.handleComplianceQuestion(message, sessionId, userId)
+      this.handlePortfolioQuestion(message, sessionId, userId, requestId),
+      this.handleComplianceQuestion(message, sessionId, userId, requestId)
     ]);
 
     const sections: string[] = [
@@ -359,6 +488,188 @@ export class DeterministicAgentService {
       sessionId,
       toolCalls
     };
+  }
+
+  private async handleCombinedScenarioAndComplianceQuestion(
+    message: string,
+    sessionId: string,
+    userId: string,
+    requestId?: string
+  ): Promise<ChatResponse> {
+    const [scenarioResult, complianceResult] = await Promise.all([
+      this.handleScenarioQuestion(message, sessionId, userId, requestId),
+      this.handleComplianceQuestion(message, sessionId, userId, requestId)
+    ]);
+
+    const sections: string[] = [
+      '### 🔎 Combined Scenario + ESG Review',
+      '',
+      scenarioResult.response,
+      '',
+      complianceResult.response
+    ];
+    const toolCalls = [...scenarioResult.toolCalls, ...complianceResult.toolCalls];
+    const hasError = Boolean(scenarioResult.isError || complianceResult.isError);
+
+    if (scenarioResult.isError) {
+      sections.push('', '⚠️ Scenario analysis was partially unavailable for this run.');
+    }
+
+    if (complianceResult.isError) {
+      sections.push(
+        '',
+        '⚠️ ESG compliance analysis was partially unavailable for this run.'
+      );
+    }
+
+    return {
+      ...(hasError
+        ? {
+            errorType:
+              scenarioResult.errorType ||
+              complianceResult.errorType ||
+              ErrorType.SERVICE,
+            isError: true
+          }
+        : {}),
+      response: sections.join('\n'),
+      sessionId,
+      toolCalls
+    };
+  }
+
+  private async handleScenarioQuestion(
+    message: string,
+    sessionId: string,
+    userId: string,
+    requestId?: string
+  ): Promise<ChatResponse> {
+    const traceableScenario = traceable(
+      async (params: {
+        message: string;
+        sessionId: string;
+        userId: string;
+      }): Promise<ChatResponse> => {
+        return this.scenarioImpl(params.message, params.sessionId, params.userId);
+      },
+      {
+        metadata: {
+          orchestrator: 'deterministic',
+          request_id: requestId || 'unknown'
+        },
+        name: 'scenario_analysis',
+        run_type: 'tool'
+      }
+    );
+
+    return traceableScenario({ message, sessionId, userId });
+  }
+
+  private async scenarioImpl(
+    message: string,
+    sessionId: string,
+    userId: string
+  ): Promise<ChatResponse> {
+    try {
+      const result = await scenarioAnalysis(
+        { message },
+        this.portfolioService,
+        userId
+      );
+
+      const toolCalls: ToolCallInfo[] = [
+        {
+          args: { message },
+          name: 'scenario_analysis',
+          result: JSON.stringify(result)
+        }
+      ];
+
+      if (result.error) {
+        return {
+          errorType: ErrorType.SERVICE,
+          isError: true,
+          response: result.error,
+          sessionId,
+          toolCalls
+        };
+      }
+
+      const parts: string[] = [
+        '### 📉 Scenario Analysis',
+        '',
+        `- **Scenario type:** ${result.scenarioType.replace(/_/g, ' ')}`,
+        `- **Estimated stress move:** ${result.estimates.expectedStressMovePercent}%`,
+        `- **Estimated shortfall:** $${result.estimates.expectedShortfallAmount.toLocaleString(undefined, {
+          maximumFractionDigits: 2,
+          minimumFractionDigits: 2
+        })}`,
+        `- **Estimated VaR (95%):** ${result.estimates.var95Percent}%`,
+        '',
+        '### 🧩 Assumptions',
+        '',
+        `- **Synthetic beta:** ${result.assumptions.syntheticBeta}`,
+        `- **Synthetic duration:** ${result.assumptions.syntheticDuration}`,
+        `- **Volatility proxy:** ${result.assumptions.volatilityProxyPercent}%`
+      ];
+
+      if (typeof result.assumptions.marketDropPercent === 'number') {
+        parts.push(
+          `- **Market drop input:** ${result.assumptions.marketDropPercent}%`
+        );
+      }
+
+      if (typeof result.assumptions.rateUpBps === 'number') {
+        parts.push(`- **Rates up input:** ${result.assumptions.rateUpBps} bps`);
+      }
+
+      if (typeof result.assumptions.rateDownBps === 'number') {
+        parts.push(`- **Rates down input:** ${result.assumptions.rateDownBps} bps`);
+      }
+
+      if (typeof result.estimates.rateUpImpactPercent === 'number') {
+        parts.push(
+          `- **Estimated impact if rates rise:** ${result.estimates.rateUpImpactPercent}%`
+        );
+      }
+
+      if (typeof result.estimates.rateDownImpactPercent === 'number') {
+        parts.push(
+          `- **Estimated impact if rates fall:** +${Math.abs(result.estimates.rateDownImpactPercent)}%`
+        );
+      }
+
+      parts.push('', '### 📌 Portfolio Context', '');
+      parts.push(`- **Current value:** $${result.context.currentValue.toLocaleString()}`);
+      parts.push(`- **Top holding weight:** ${result.context.topHoldingPercent}%`);
+      parts.push(`- **HHI:** ${result.context.herfindahlIndex}`);
+      parts.push(`- **Equity weight:** ${result.context.equityWeightPercent}%`);
+      parts.push(`- **Bond weight:** ${result.context.bondWeightPercent}%`);
+
+      return {
+        response: parts.join('\n'),
+        sessionId,
+        toolCalls
+      };
+    } catch (err) {
+      const classified =
+        err instanceof AgentError
+          ? err
+          : new AgentError(
+              ErrorType.SERVICE,
+              'Unable to run scenario analysis. Please try again later.',
+              true,
+              err instanceof Error ? err : undefined
+            );
+
+      return {
+        errorType: classified.type,
+        isError: true,
+        response: classified.userMessage,
+        sessionId,
+        toolCalls: []
+      };
+    }
   }
 
   private async marketDataImpl(
@@ -444,7 +755,8 @@ export class DeterministicAgentService {
   private async handleComplianceQuestion(
     message: string,
     sessionId: string,
-    userId: string
+    userId: string,
+    requestId?: string
   ): Promise<ChatResponse> {
     const traceableCompliance = traceable(
       async (params: {
@@ -454,7 +766,14 @@ export class DeterministicAgentService {
       }): Promise<ChatResponse> => {
         return this.complianceImpl(params.message, params.sessionId, params.userId);
       },
-      { name: 'compliance_check', run_type: 'tool' }
+      {
+        metadata: {
+          orchestrator: 'deterministic',
+          request_id: requestId || 'unknown'
+        },
+        name: 'compliance_check',
+        run_type: 'tool'
+      }
     );
 
     return traceableCompliance({ message, sessionId, userId });
@@ -505,15 +824,31 @@ export class DeterministicAgentService {
     }
 
     const filterCategory = detectCategoryFilter(message);
+    const requestedSymbols = this.extractExplicitHoldingSymbols(message);
+    const scopedHoldings =
+      requestedSymbols.length > 0
+        ? holdingInputs.filter((holding) => {
+            const symbol = String(holding.symbol || '').toUpperCase();
+            const name = String(holding.name || '').toUpperCase();
+
+            return (
+              requestedSymbols.includes(symbol) || requestedSymbols.includes(name)
+            );
+          })
+        : holdingInputs;
 
     const result = await complianceCheck({
       filterCategory,
-      holdings: holdingInputs
+      holdings: scopedHoldings,
+      ...(requestedSymbols.length > 0 ? { requestedSymbols } : {})
     });
 
     const toolCalls: ToolCallInfo[] = [
       {
-        args: { filterCategory: filterCategory || 'all' },
+        args: {
+          filterCategory: filterCategory || 'all',
+          ...(requestedSymbols.length > 0 ? { symbols: requestedSymbols } : {})
+        },
         name: 'compliance_check',
         result: JSON.stringify(result)
       }
@@ -521,9 +856,10 @@ export class DeterministicAgentService {
 
     const parts = this.buildComplianceResponseParts(
       message,
-      holdingInputs,
+      scopedHoldings,
       result,
-      filterCategory
+      filterCategory,
+      requestedSymbols
     );
 
     return {
@@ -536,7 +872,8 @@ export class DeterministicAgentService {
   private async handlePortfolioQuestion(
     message: string,
     sessionId: string,
-    userId: string
+    userId: string,
+    requestId?: string
   ): Promise<ChatResponse> {
     const traceablePortfolio = traceable(
       async (params: {
@@ -546,7 +883,14 @@ export class DeterministicAgentService {
       }): Promise<ChatResponse> => {
         return this.portfolioImpl(params.message, params.sessionId, params.userId);
       },
-      { name: 'portfolio_risk_analysis', run_type: 'tool' }
+      {
+        metadata: {
+          orchestrator: 'deterministic',
+          request_id: requestId || 'unknown'
+        },
+        name: 'portfolio_risk_analysis',
+        run_type: 'tool'
+      }
     );
 
     return traceablePortfolio({ message, sessionId, userId });
@@ -642,6 +986,21 @@ export class DeterministicAgentService {
       parts.push('');
       parts.push(`*${result.holdingsCount} holdings analyzed*`);
 
+      const unsupportedRequests = this.detectUnsupportedPortfolioRequests(message);
+      if (unsupportedRequests.length > 0) {
+        parts.push('');
+        parts.push('### ⚠️ Capability Note');
+        parts.push('');
+        parts.push(
+          `- I cannot directly compute **${unsupportedRequests.join(
+            ', '
+          )}** from the current portfolio tool output.`
+        );
+        parts.push(
+          '- Closest available analysis: concentration, diversification, asset-class allocation, and realized performance from your live portfolio snapshot.'
+        );
+      }
+
       if (this.shouldIncludeRebalancingGuidance(message)) {
         const topHolding = concentration.topHoldings[0];
         const secondHolding = concentration.topHoldings[1];
@@ -730,7 +1089,8 @@ export class DeterministicAgentService {
     if (
       extracted.length === 0 &&
       !isEsgQuestion(message) &&
-      !isPortfolioQuestion(message)
+      !isPortfolioQuestion(message) &&
+      !isScenarioQuestion(message)
     ) {
       if (recentContext.hasHistory && recentContext.lastSymbols.length > 0) {
         return {
@@ -747,14 +1107,37 @@ export class DeterministicAgentService {
     const symbolPattern = /\b([A-Z]{1,12})\b/g;
     const potentialSymbols: string[] = message.match(symbolPattern) || [];
 
-    return potentialSymbols.filter(
-      (symbol) =>
-        !COMMON_SYMBOL_FALSE_POSITIVES.has(symbol) && symbol.length >= 2
+    return Array.from(
+      new Set(
+        potentialSymbols.filter(
+          (symbol) =>
+            !COMMON_SYMBOL_FALSE_POSITIVES.has(symbol) && symbol.length >= 2
+        )
+      )
     );
   }
 
+  private extractExplicitHoldingSymbols(message: string): string[] {
+    const directMatches = this.extractSymbols(message).filter((symbol) => {
+      return symbol.length <= 5;
+    });
+
+    const byPrefix = Array.from(
+      message.matchAll(/\b(?:ticker|symbol|holdings?)\s*[:\-]?\s*([A-Z]{2,5})\b/gi)
+    ).map((match) => String(match[1] || '').toUpperCase());
+
+    return Array.from(new Set([...directMatches, ...byPrefix])).filter((symbol) => {
+      return !COMMON_SYMBOL_FALSE_POSITIVES.has(symbol);
+    });
+  }
+
   private isShortAffirmation(message: string): boolean {
-    const normalized = message.trim().toLowerCase();
+    const normalized = message
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z\s]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
     const patterns = [
       /^(yes|yeah|yep|sure|ok|okay|please do|go ahead)$/i,
       /^(both|both please|both of the above|all of the above|do both)$/i
@@ -794,15 +1177,26 @@ export class DeterministicAgentService {
       .slice()
       .reverse()
       .find((entry) => entry.role === 'assistant');
-    const assistantText = (lastAssistant?.content || '').toLowerCase();
+    const lastUser = recentMessages
+      .slice()
+      .reverse()
+      .find((entry) => entry.role === 'user');
+    const continuationContextText = [
+      lastAssistant?.content || '',
+      lastUser?.content || ''
+    ]
+      .join('\n')
+      .toLowerCase();
 
     const assistantMentionsEsg =
-      /(esg|offender|compliance|score)/.test(assistantText);
+      /(esg|offender|compliance|score)/.test(continuationContextText);
     const assistantMentionsRisk =
-      /(risk|rebalanc|portfolio|concentration)/.test(assistantText);
+      /(risk|rebalanc|portfolio|concentration|exposure|volatility|hedge)/.test(
+        continuationContextText
+      );
     const assistantAskedChoice =
-      /(did you mean|both of the above|would you like|choose|clarification)/.test(
-        assistantText
+      /(did you mean|both of the above|all of the above|would you like|choose|clarification|are you asking)/.test(
+        continuationContextText
       );
 
     if (assistantAskedChoice && assistantMentionsEsg && assistantMentionsRisk) {
@@ -835,6 +1229,88 @@ export class DeterministicAgentService {
     return null;
   }
 
+  private deriveToolExecutions(
+    toolCalls: ToolCallInfo[]
+  ): AgentToolExecutionMetric[] {
+    return toolCalls.map((toolCall) => {
+      let parsed: unknown;
+      let parseFailed = false;
+
+      try {
+        parsed = JSON.parse(toolCall.result);
+      } catch {
+        parseFailed = true;
+      }
+
+      const payloadFailed = parseFailed
+        ? true
+        : this.isToolCallFailurePayload(parsed);
+
+      return {
+        errorType: payloadFailed ? ErrorType.TOOL : undefined,
+        latencyMs: 0,
+        name: toolCall.name,
+        success: !payloadFailed
+      };
+    });
+  }
+
+  private isToolCallFailurePayload(payload: unknown): boolean {
+    if (!payload || typeof payload !== 'object') {
+      return false;
+    }
+
+    if ('error' in (payload as Record<string, unknown>)) {
+      const error = (payload as Record<string, unknown>).error;
+      if (typeof error === 'string' && error.trim().length > 0) {
+        return true;
+      }
+    }
+
+    const values = Object.values(payload as Record<string, unknown>);
+    if (values.length === 0) {
+      return false;
+    }
+
+    const everyValueErrored = values.every((value) => {
+      if (!value || typeof value !== 'object') {
+        return false;
+      }
+
+      const error = (value as Record<string, unknown>).error;
+      return typeof error === 'string' && error.trim().length > 0;
+    });
+
+    return everyValueErrored;
+  }
+
+  private detectUnsupportedPortfolioRequests(message: string): string[] {
+    const lower = message.toLowerCase();
+    const requested: string[] = [];
+
+    if (/(sharpe|sortino)/.test(lower)) {
+      requested.push('Sharpe/Sortino ratio');
+    }
+
+    if (/(correlation|benchmark|s&p|sp500|\bbeta\b)/.test(lower)) {
+      requested.push('benchmark correlation/beta');
+    }
+
+    if (
+      /(expected return|projected return|forecast|forward return|recovery timeline|recover.*return)/.test(
+        lower
+      )
+    ) {
+      requested.push('forward return projection');
+    }
+
+    if (/(sector allocation|sector breakdown|sector exposure)/.test(lower)) {
+      requested.push('sector-level allocation');
+    }
+
+    return Array.from(new Set(requested));
+  }
+
   private shouldIncludeRebalancingGuidance(message: string): boolean {
     const lower = message.toLowerCase();
 
@@ -849,7 +1325,8 @@ export class DeterministicAgentService {
       valueInBaseCurrency: number;
     }[],
     result: ComplianceCheckOutput,
-    filterCategory?: string
+    filterCategory?: string,
+    requestedSymbols: string[] = []
   ): string[] {
     const parts: string[] = [];
     const filterLabel = filterCategory
@@ -874,6 +1351,22 @@ export class DeterministicAgentService {
     parts.push(
       `- **Source:** ESG Violations Dataset v${result.datasetVersion} (${result.datasetLastUpdated})`
     );
+
+    if (requestedSymbols.length > 0) {
+      const matched = result.matchedSymbols || [];
+      const unmatched = result.unmatchedSymbols || [];
+
+      parts.push(
+        `- **Requested holdings:** ${requestedSymbols.join(', ')}`
+      );
+      parts.push(
+        `- **Matched in portfolio:** ${matched.length > 0 ? matched.join(', ') : 'none'}`
+      );
+
+      if (unmatched.length > 0) {
+        parts.push(`- **Not found:** ${unmatched.join(', ')}`);
+      }
+    }
 
     if (!hasViolations) {
       parts.push('');
