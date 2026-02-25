@@ -6,8 +6,8 @@
 
   <div class="chat-messages">
     @for (message of messages; track $index) {
-      <div class="message" [class.user]="message.role === 'user'" [class.assistant]="message.role === 'assistant'">
-        <div class="message-role">{{ message.role === 'user' ? 'You' : 'Agent' }}</div>
+      <div class="message" [class.user]="message.role === 'user'" [class.assistant]="message.role === 'assistant'" [class.error]="message.isError">
+        <div class="message-role">{{ message.role === 'user' ? 'You' : message.isError ? 'Error' : 'Agent' }}</div>
         @if (message.role === 'assistant') {
           <div class="message-content">
             <markdown [data]="message.content"></markdown>
