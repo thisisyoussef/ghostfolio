@@ -79,5 +79,6 @@ jobs:
         env:
           EVAL_ACCESS_TOKEN: ${{ secrets.EVAL_ACCESS_TOKEN }}
           LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
+          LANGSMITH_WORKSPACE_ID: ${{ secrets.LANGSMITH_WORKSPACE_ID }}
           LANGSMITH_TRACING: 'true'
         run: npx tsx apps/api/src/app/agent/evals/eval-runner-langsmith.ts
