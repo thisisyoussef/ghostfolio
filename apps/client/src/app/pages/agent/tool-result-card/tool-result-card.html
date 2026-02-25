@@ -1,183 +1,333 @@
-@switch (toolType) {
-  @case ('market-data') {
-    @for (stock of marketData; track stock.symbol) {
-      <mat-card appearance="outlined" class="tool-card market-card">
-        <mat-card-content>
-          <div class="card-header">
-            <ion-icon name="trending-up-outline" />
-            <span class="card-label">Market Data</span>
-          </div>
+@if (hasToolFallbackState()) {
+  <mat-card appearance="outlined" class="tool-card fallback-card">
+    <mat-card-content>
+      <div class="card-header">
+        <ion-icon name="alert-circle-outline" />
+        <span class="card-label">Tool Output</span>
+      </div>
+      <div class="fallback-title">Tool output unavailable</div>
+      <div class="fallback-message">{{ fallbackMessage }}</div>
+    </mat-card-content>
+  </mat-card>
+} @else {
+  @switch (toolType) {
+    @case ('market-data') {
+      @for (stock of marketData; track stock.symbol) {
+        <mat-card appearance="outlined" class="tool-card market-card">
+          <mat-card-content>
+            <div class="card-header">
+              <ion-icon name="trending-up-outline" />
+              <span class="card-label">Market Data</span>
+            </div>
 
-          <div class="stock-header">
-            <div class="stock-symbol">{{ stock.symbol }}</div>
-            <div class="stock-name">{{ stock.name }}</div>
-          </div>
+            <div class="stock-header">
+              <div class="stock-symbol">{{ stock.symbol }}</div>
+              @if (stock.name) {
+                <div class="stock-name">{{ stock.name }}</div>
+              }
+            </div>
 
-          <div class="price-row">
-            <span class="price-value">${{ formatNumber(stock.price) }}</span>
-            @if (stock.change !== undefined) {
-              <span class="price-change" [class.positive]="(stock.change ?? 0) >= 0" [class.negative]="(stock.change ?? 0) < 0">
-                {{ (stock.change ?? 0) >= 0 ? '+' : '' }}{{ formatNumber(stock.change) }}
-                @if (stock.changePercent !== undefined) {
-                  ({{ (stock.changePercent ?? 0) >= 0 ? '+' : '' }}{{ formatNumber(stock.changePercent) }}%)
+            @if (stock.error) {
+              <div class="tool-error">{{ stock.error }}</div>
+            } @else {
+              <div class="price-row">
+                <span class="price-value">${{ formatNumber(stock.price) }}</span>
+                @if (stock.change !== undefined) {
+                  <span class="price-change" [class.positive]="(stock.change ?? 0) >= 0" [class.negative]="(stock.change ?? 0) < 0">
+                    {{ (stock.change ?? 0) >= 0 ? '+' : '' }}{{ formatNumber(stock.change) }}
+                    @if (stock.changePercent !== undefined) {
+                      ({{ (stock.changePercent ?? 0) >= 0 ? '+' : '' }}{{ formatNumber(stock.changePercent) }}%)
+                    }
+                  </span>
                 }
-              </span>
-            }
-          </div>
-
-          @if (stock.open !== undefined || stock.high !== undefined || stock.low !== undefined || stock.volume !== undefined) {
-            <div class="stats-grid">
-              @if (stock.open !== undefined) {
-                <div class="stat">
-                  <div class="stat-label">Open</div>
-                  <div class="stat-value">{{ formatNumber(stock.open) }}</div>
-                </div>
-              }
-              @if (stock.high !== undefined) {
-                <div class="stat">
-                  <div class="stat-label">High</div>
-                  <div class="stat-value">{{ formatNumber(stock.high) }}</div>
-                </div>
-              }
-              @if (stock.low !== undefined) {
-                <div class="stat">
-                  <div class="stat-label">Low</div>
-                  <div class="stat-value">{{ formatNumber(stock.low) }}</div>
-                </div>
-              }
-              @if (stock.volume !== undefined) {
-                <div class="stat">
-                  <div class="stat-label">Volume</div>
-                  <div class="stat-value">{{ formatVolume(stock.volume) }}</div>
-                </div>
-              }
-            </div>
-          }
-
-          @if (stock.fiftyTwoWeekLow !== undefined && stock.fiftyTwoWeekHigh !== undefined) {
-            <div class="range-section">
-              <div class="range-label">52-Week Range</div>
-              <div class="range-bar-container">
-                <span class="range-value">{{ formatNumber(stock.fiftyTwoWeekLow, 0) }}</span>
-                <div class="range-bar">
-                  <div class="range-fill" [style.width.%]="get52WeekPercent(stock)"></div>
-                  <div class="range-marker" [style.left.%]="get52WeekPercent(stock)"></div>
-                </div>
-                <span class="range-value">{{ formatNumber(stock.fiftyTwoWeekHigh, 0) }}</span>
               </div>
-            </div>
-          }
-        </mat-card-content>
-      </mat-card>
-    }
-  }
 
-  @case ('portfolio') {
-    @if (portfolioData) {
-      <mat-card appearance="outlined" class="tool-card portfolio-card">
-        <mat-card-content>
-          <div class="card-header">
-            <ion-icon name="pie-chart-outline" />
-            <span class="card-label">Portfolio Analysis</span>
-          </div>
-
-          <div class="portfolio-metrics">
-            @if (portfolioData.hhi !== undefined) {
-              <div class="metric-block">
-                <div class="metric-label">Concentration (HHI)</div>
-                <div class="metric-value">{{ formatNumber(portfolioData.hhi, 3) }}</div>
-                <div class="metric-sublabel" [class]="getDiversificationClass()">
-                  {{ portfolioData.diversificationLevel }}
-                </div>
-              </div>
-            }
-
-            @if (portfolioData.totalValue !== undefined) {
-              <div class="metric-block">
-                <div class="metric-label">Total Value</div>
-                <div class="metric-value">${{ formatNumber(portfolioData.totalValue) }}</div>
-              </div>
-            }
-          </div>
-
-          @if (portfolioData.topHoldings?.length) {
-            <div class="holdings-section">
-              <div class="section-label">Top Holdings</div>
-              @for (holding of portfolioData.topHoldings; track holding.name) {
-                <div class="holding-row">
-                  <span class="holding-name">{{ holding.name }}</span>
-                  <div class="holding-bar-container">
-                    <div class="holding-bar" [style.width.%]="holding.allocationInPercentage"></div>
-                  </div>
-                  <span class="holding-percent">{{ formatNumber(holding.allocationInPercentage, 1) }}%</span>
-                </div>
-              }
-            </div>
-          }
-
-          @if (portfolioData.performance?.length) {
-            <div class="performance-row">
-              @for (perf of portfolioData.performance; track perf.label) {
-                <div class="perf-item">
-                  <div class="perf-label">{{ perf.label }}</div>
-                  <div class="perf-value" [class.positive]="perf.value >= 0" [class.negative]="perf.value < 0">
-                    {{ perf.value >= 0 ? '+' : '' }}{{ formatNumber(perf.value, 1) }}%
-                  </div>
-                </div>
-              }
-            </div>
-          }
-        </mat-card-content>
-      </mat-card>
-    }
-  }
-
-  @case ('esg') {
-    @if (esgData) {
-      <mat-card appearance="outlined" class="tool-card esg-card">
-        <mat-card-content>
-          <div class="card-header">
-            <ion-icon name="leaf-outline" />
-            <span class="card-label">ESG Compliance</span>
-          </div>
-
-          <div class="esg-summary">
-            @if (esgData.compliantCount !== undefined) {
-              <div class="esg-badge compliant">
-                <ion-icon name="checkmark-circle-outline" />
-                {{ esgData.compliantCount }} compliant
-              </div>
-            }
-            @if (esgData.flaggedCount) {
-              <div class="esg-badge flagged">
-                <ion-icon name="warning-outline" />
-                {{ esgData.flaggedCount }} flagged
-              </div>
-            }
-          </div>
-
-          @if (esgData.violations?.length) {
-            <div class="violations-list">
-              @for (violation of esgData.violations; track $index) {
-                <div class="violation-item" [class]="getSeverityClass(violation.severity)">
-                  <div class="violation-header">
-                    <span class="violation-holding">{{ violation.holding }}</span>
-                    <span class="violation-severity">{{ violation.severity }}</span>
-                  </div>
-                  <div class="violation-category">{{ violation.category }}</div>
-                  @if (violation.description) {
-                    <div class="violation-description">{{ violation.description }}</div>
+              @if (stock.open !== undefined || stock.high !== undefined || stock.low !== undefined || stock.volume !== undefined) {
+                <div class="stats-grid">
+                  @if (stock.open !== undefined) {
+                    <div class="stat">
+                      <div class="stat-label">Open</div>
+                      <div class="stat-value">{{ formatNumber(stock.open) }}</div>
+                    </div>
+                  }
+                  @if (stock.high !== undefined) {
+                    <div class="stat">
+                      <div class="stat-label">High</div>
+                      <div class="stat-value">{{ formatNumber(stock.high) }}</div>
+                    </div>
+                  }
+                  @if (stock.low !== undefined) {
+                    <div class="stat">
+                      <div class="stat-label">Low</div>
+                      <div class="stat-value">{{ formatNumber(stock.low) }}</div>
+                    </div>
+                  }
+                  @if (stock.volume !== undefined) {
+                    <div class="stat">
+                      <div class="stat-label">Volume</div>
+                      <div class="stat-value">{{ formatVolume(stock.volume) }}</div>
+                    </div>
                   }
                 </div>
               }
-            </div>
-          }
 
-          @if (esgData.summary) {
-            <div class="esg-summary-text">{{ esgData.summary }}</div>
-          }
-        </mat-card-content>
-      </mat-card>
+              @if (stock.fiftyTwoWeekLow !== undefined && stock.fiftyTwoWeekHigh !== undefined) {
+                <div class="range-section">
+                  <div class="range-label">52-Week Range</div>
+                  <div class="range-bar-container">
+                    <span class="range-value">{{ formatNumber(stock.fiftyTwoWeekLow, 0) }}</span>
+                    <div class="range-bar">
+                      <div class="range-fill" [style.width.%]="get52WeekPercent(stock)"></div>
+                      <div class="range-marker" [style.left.%]="get52WeekPercent(stock)"></div>
+                    </div>
+                    <span class="range-value">{{ formatNumber(stock.fiftyTwoWeekHigh, 0) }}</span>
+                  </div>
+                </div>
+              }
+            }
+
+            @if (stock.verification) {
+              <div class="verification-summary">
+                <span class="verification-badge" [class]="getVerificationClass(stock.verification.status)">
+                  {{ stock.verification.status | uppercase }}
+                </span>
+                <span class="verification-text">
+                  Confidence {{ stock.verification.confidenceScore }}/100 ({{ stock.verification.confidenceLevel }})
+                </span>
+              </div>
+            }
+
+            @if (stock.discrepancyWarning) {
+              <div class="warning-banner">{{ stock.discrepancyWarning }}</div>
+            }
+
+            @if (stock.sourceAttribution?.primary) {
+              <div class="source-line">
+                Source: {{ stock.sourceAttribution?.primary?.source }} ·
+                {{ formatTimestamp(stock.sourceAttribution?.primary?.timestamp) }}
+              </div>
+            }
+            @if (stock.sourceAttribution?.backup) {
+              <div class="source-line">
+                Backup: {{ stock.sourceAttribution?.backup?.source }} ·
+                {{ formatTimestamp(stock.sourceAttribution?.backup?.timestamp) }}
+              </div>
+            }
+          </mat-card-content>
+        </mat-card>
+      }
+    }
+
+    @case ('portfolio') {
+      @if (portfolioData) {
+        <mat-card appearance="outlined" class="tool-card portfolio-card">
+          <mat-card-content>
+            <div class="card-header">
+              <ion-icon name="pie-chart-outline" />
+              <span class="card-label">Portfolio Analysis</span>
+            </div>
+
+            @if (portfolioData.error) {
+              <div class="tool-error">{{ portfolioData.error }}</div>
+            } @else {
+              <div class="portfolio-metrics">
+                @if (portfolioData.hhi !== undefined) {
+                  <div class="metric-block">
+                    <div class="metric-label">Concentration (HHI)</div>
+                    <div class="metric-value">{{ formatNumber(portfolioData.hhi, 3) }}</div>
+                    <div class="metric-sublabel" [class]="getDiversificationClass()">
+                      {{ portfolioData.diversificationLevel }}
+                    </div>
+                  </div>
+                }
+
+                @if (portfolioData.totalValue !== undefined) {
+                  <div class="metric-block">
+                    <div class="metric-label">Total Value</div>
+                    <div class="metric-value">${{ formatNumber(portfolioData.totalValue) }}</div>
+                  </div>
+                }
+              </div>
+
+              @if (portfolioData.topHoldings.length) {
+                <div class="holdings-section">
+                  <div class="section-label">Top Holdings</div>
+                  @for (holding of portfolioData.topHoldings; track holding.name) {
+                    <div class="holding-row">
+                      <span class="holding-name">{{ holding.name }}</span>
+                      <div class="holding-bar-container">
+                        <div class="holding-bar" [style.width.%]="holding.allocationInPercentage"></div>
+                      </div>
+                      <span class="holding-percent">{{ formatNumber(holding.allocationInPercentage, 1) }}%</span>
+                    </div>
+                  }
+                </div>
+              }
+
+              @if (portfolioData.allocationByAssetClass.length) {
+                <div class="allocation-section">
+                  <div class="section-label">Allocation by Asset Class</div>
+                  @for (allocation of portfolioData.allocationByAssetClass; track allocation.assetClass) {
+                    <div class="allocation-row">
+                      <span>{{ allocation.assetClass }}</span>
+                      <span>{{ formatNumber(allocation.percentage, 2) }}%</span>
+                    </div>
+                  }
+                </div>
+              }
+
+              @if (hasPortfolioPerformanceSummary()) {
+                <div class="performance-grid">
+                  @if (portfolioData.performance.currentValue !== undefined) {
+                    <div class="perf-item">
+                      <div class="perf-label">Current Value</div>
+                      <div class="perf-value">${{ formatNumber(portfolioData.performance.currentValue) }}</div>
+                    </div>
+                  }
+                  @if (portfolioData.performance.totalInvestment !== undefined) {
+                    <div class="perf-item">
+                      <div class="perf-label">Total Investment</div>
+                      <div class="perf-value">${{ formatNumber(portfolioData.performance.totalInvestment) }}</div>
+                    </div>
+                  }
+                  @if (portfolioData.performance.totalReturn !== undefined) {
+                    <div class="perf-item">
+                      <div class="perf-label">Total Return</div>
+                      <div class="perf-value" [class.positive]="(portfolioData.performance.totalReturn ?? 0) >= 0" [class.negative]="(portfolioData.performance.totalReturn ?? 0) < 0">
+                        {{ (portfolioData.performance.totalReturn ?? 0) >= 0 ? '+' : '' }}{{ formatNumber(portfolioData.performance.totalReturn) }}
+                      </div>
+                    </div>
+                  }
+                  @if (portfolioData.performance.totalReturnPercent !== undefined) {
+                    <div class="perf-item">
+                      <div class="perf-label">Return %</div>
+                      <div class="perf-value" [class.positive]="(portfolioData.performance.totalReturnPercent ?? 0) >= 0" [class.negative]="(portfolioData.performance.totalReturnPercent ?? 0) < 0">
+                        {{ (portfolioData.performance.totalReturnPercent ?? 0) >= 0 ? '+' : '' }}{{ formatNumber(portfolioData.performance.totalReturnPercent, 2) }}%
+                      </div>
+                    </div>
+                  }
+                </div>
+              }
+            }
+
+            @if (portfolioData.verification) {
+              <div class="verification-summary">
+                <span class="verification-badge" [class]="getVerificationClass(portfolioData.verification.status)">
+                  {{ portfolioData.verification.status | uppercase }}
+                </span>
+                <span class="verification-text">
+                  Confidence {{ portfolioData.verification.confidenceScore }}/100 ({{ portfolioData.verification.confidenceLevel }})
+                </span>
+              </div>
+            }
+
+            @if (portfolioData.sourceAttribution?.primary) {
+              <div class="source-line">
+                Source: {{ portfolioData.sourceAttribution?.primary?.source }} ·
+                {{ formatTimestamp(portfolioData.sourceAttribution?.primary?.timestamp) }}
+              </div>
+            }
+          </mat-card-content>
+        </mat-card>
+      }
+    }
+
+    @case ('esg') {
+      @if (esgData) {
+        <mat-card appearance="outlined" class="tool-card esg-card">
+          <mat-card-content>
+            <div class="card-header">
+              <ion-icon name="leaf-outline" />
+              <span class="card-label">ESG Compliance</span>
+            </div>
+
+            @if (esgData.error) {
+              <div class="tool-error">{{ esgData.error }}</div>
+            } @else {
+              <div class="esg-summary">
+                @if (esgData.complianceScore !== undefined) {
+                  <div class="esg-badge compliant">
+                    <ion-icon name="checkmark-circle-outline" />
+                    Score: {{ formatNumber(esgData.complianceScore, 2) }}%
+                  </div>
+                }
+                @if (esgData.flaggedCount !== undefined) {
+                  <div class="esg-badge flagged">
+                    <ion-icon name="warning-outline" />
+                    {{ esgData.flaggedCount }} flagged
+                  </div>
+                }
+              </div>
+
+              <div class="esg-metadata">
+                @if (esgData.totalChecked !== undefined) {
+                  <div class="meta-row"><span>Checked</span><span>{{ esgData.totalChecked }}</span></div>
+                }
+                @if (esgData.cleanCount !== undefined) {
+                  <div class="meta-row"><span>Clean</span><span>{{ esgData.cleanCount }}</span></div>
+                }
+                @if (esgData.datasetVersion) {
+                  <div class="meta-row"><span>Dataset</span><span>v{{ esgData.datasetVersion }}</span></div>
+                }
+                @if (esgData.datasetLastUpdated) {
+                  <div class="meta-row"><span>Last Updated</span><span>{{ esgData.datasetLastUpdated }}</span></div>
+                }
+              </div>
+
+              @if (esgData.violations.length) {
+                <div class="violations-list">
+                  @for (violation of esgData.violations; track $index) {
+                    <div class="violation-item" [class]="getSeverityClass(violation.severity)">
+                      <div class="violation-header">
+                        <span class="violation-holding">{{ violation.holding }}</span>
+                        <span class="violation-severity">{{ violation.severity }}</span>
+                      </div>
+                      <div class="violation-category">
+                        {{ formatCategories(violation.categories) }}
+                      </div>
+                      @if (violation.description) {
+                        <div class="violation-description">{{ violation.description }}</div>
+                      }
+                    </div>
+                  }
+                </div>
+              }
+
+              @if (esgData.summary) {
+                <div class="esg-summary-text">{{ esgData.summary }}</div>
+              }
+
+              @if (esgData.requestedSymbols?.length) {
+                <div class="symbol-metadata">Requested: {{ esgData.requestedSymbols?.join(', ') }}</div>
+              }
+              @if (esgData.matchedSymbols?.length) {
+                <div class="symbol-metadata">Matched: {{ esgData.matchedSymbols?.join(', ') }}</div>
+              }
+              @if (esgData.unmatchedSymbols?.length) {
+                <div class="symbol-metadata">Unmatched: {{ esgData.unmatchedSymbols?.join(', ') }}</div>
+              }
+            }
+
+            @if (esgData.verification) {
+              <div class="verification-summary">
+                <span class="verification-badge" [class]="getVerificationClass(esgData.verification.status)">
+                  {{ esgData.verification.status | uppercase }}
+                </span>
+                <span class="verification-text">
+                  Confidence {{ esgData.verification.confidenceScore }}/100 ({{ esgData.verification.confidenceLevel }})
+                </span>
+              </div>
+            }
+
+            @if (esgData.sourceAttribution?.primary) {
+              <div class="source-line">
+                Source: {{ esgData.sourceAttribution?.primary?.source }} ·
+                {{ formatTimestamp(esgData.sourceAttribution?.primary?.timestamp) }}
+              </div>
+            }
+          </mat-card-content>
+        </mat-card>
+      }
     }
   }
 }

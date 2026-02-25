@@ -6,7 +6,14 @@
 
     <mat-card [appearance]="role === 'assistant' ? 'outlined' : undefined" class="message-card">
       <mat-card-content>
-        <div class="message-role">{{ isError ? 'Error' : (role === 'user' ? 'You' : 'Agent') }}</div>
+        <div class="message-role">
+          {{ isError ? 'Error' : (role === 'user' ? 'You' : 'Agent') }}
+          @if (isError && role === 'assistant') {
+            <span class="error-type-chip" [ngClass]="errorTypeClass">
+              {{ errorTypeLabel }}
+            </span>
+          }
+        </div>
 
         @if (role === 'assistant') {
           <div class="message-content">

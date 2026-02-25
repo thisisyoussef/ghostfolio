@@ -73,11 +73,49 @@
 }
 
 .message-role {
+  align-items: center;
+  display: flex;
+  gap: 0.4rem;
   font-size: 0.7rem;
   font-weight: 600;
   text-transform: uppercase;
   margin-bottom: 0.25rem;
   opacity: 0.6;
+}
+
+.error-type-chip {
+  border-radius: 999px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  opacity: 1;
+  padding: 0.12rem 0.45rem;
+  text-transform: none;
+}
+
+.error-data {
+  background: rgba(255, 152, 0, 0.16);
+  color: #ef6c00;
+}
+
+.error-tool {
+  background: rgba(3, 169, 244, 0.14);
+  color: #0277bd;
+}
+
+.error-model {
+  background: rgba(171, 71, 188, 0.14);
+  color: #7b1fa2;
+}
+
+.error-service {
+  background: rgba(244, 67, 54, 0.15);
+  color: #c62828;
+}
+
+.error-unknown {
+  background: rgba(120, 144, 156, 0.14);
+  color: #455a64;
 }
 
 .message-content {

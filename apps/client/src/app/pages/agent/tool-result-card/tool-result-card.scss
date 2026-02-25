@@ -15,6 +15,10 @@
   overflow: hidden;
 }
 
+.fallback-card {
+  border-style: dashed;
+}
+
 .card-header {
   display: flex;
   align-items: center;
@@ -29,6 +33,26 @@
   ion-icon {
     font-size: 0.875rem;
   }
+}
+
+.fallback-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin-bottom: 0.35rem;
+}
+
+.fallback-message {
+  font-size: 0.82rem;
+  opacity: 0.75;
+}
+
+.tool-error {
+  background: rgba(244, 67, 54, 0.08);
+  border-left: 3px solid #f44336;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  margin-bottom: 0.75rem;
+  padding: 0.5rem 0.625rem;
 }
 
 .stock-header {
@@ -236,9 +260,21 @@
   text-align: right;
 }
 
-.performance-row {
+.allocation-section {
+  margin-bottom: 0.75rem;
+}
+
+.allocation-row {
   display: flex;
+  font-size: 0.8rem;
+  justify-content: space-between;
+  margin-bottom: 0.25rem;
+}
+
+.performance-grid {
+  display: grid;
   gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   padding-top: 0.75rem;
   border-top: 1px solid rgba(0, 0, 0, 0.08);
 
@@ -294,6 +330,17 @@
     background: rgba(255, 152, 0, 0.12);
     color: #ff9800;
   }
+}
+
+.esg-metadata {
+  margin-bottom: 0.75rem;
+}
+
+.meta-row {
+  display: flex;
+  font-size: 0.8rem;
+  justify-content: space-between;
+  margin-bottom: 0.2rem;
 }
 
 .violations-list {
@@ -358,6 +405,69 @@
   font-size: 0.75rem;
   opacity: 0.6;
   margin-top: 0.25rem;
+}
+
+.verification-summary {
+  align-items: center;
+  border-top: 1px solid rgba(0, 0, 0, 0.08);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  padding-top: 0.65rem;
+
+  :host-context(.theme-dark) & {
+    border-color: rgba(255, 255, 255, 0.08);
+  }
+}
+
+.verification-badge {
+  border-radius: 999px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  padding: 0.15rem 0.45rem;
+}
+
+.status-pass {
+  background: rgba(76, 175, 80, 0.14);
+  color: #2e7d32;
+}
+
+.status-warning {
+  background: rgba(255, 152, 0, 0.14);
+  color: #ef6c00;
+}
+
+.status-fail {
+  background: rgba(244, 67, 54, 0.14);
+  color: #c62828;
+}
+
+.verification-text {
+  font-size: 0.75rem;
+  opacity: 0.75;
+}
+
+.warning-banner {
+  background: rgba(255, 152, 0, 0.1);
+  border-left: 3px solid #ff9800;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  margin-top: 0.55rem;
+  padding: 0.45rem 0.55rem;
+}
+
+.source-line {
+  font-size: 0.72rem;
+  margin-top: 0.35rem;
+  opacity: 0.72;
+}
+
+.symbol-metadata {
+  font-size: 0.75rem;
+  margin-top: 0.35rem;
+  opacity: 0.7;
 }
 
 .esg-summary-text {

@@ -38,6 +38,8 @@ interface VerificationSummary {
   generatedAt: string;
 }
 
+type ErrorType = 'data' | 'tool' | 'model' | 'service';
+
 @Component({
   imports: [CommonModule, MatButtonModule, MatCardModule, MarkdownModule, GfToolResultCardComponent],
   schemas: [CUSTOM_ELEMENTS_SCHEMA],
@@ -60,7 +62,7 @@ export class GfChatMessageComponent {
   @Input() toolCalls?: ToolCall[];
   @Input() verification?: VerificationSummary;
   @Input() isError = false;
-  @Input() errorType = '';
+  @Input() errorType: ErrorType | string = '';
 
   public showToolCalls = false;
 
@@ -130,6 +132,36 @@ export class GfChatMessageComponent {
     return [...new Set(names)];
   }
 
+  public get errorTypeClass(): string {
+    switch (this.normalizedErrorType) {
+      case 'data':
+        return 'error-data';
+      case 'tool':
+        return 'error-tool';
+      case 'model':
+        return 'error-model';
+      case 'service':
+        return 'error-service';
+      default:
+        return 'error-unknown';
+    }
+  }
+
+  public get errorTypeLabel(): string {
+    switch (this.normalizedErrorType) {
+      case 'data':
+        return 'Data issue';
+      case 'tool':
+        return 'Tool execution issue';
+      case 'model':
+        return 'Reasoning/model issue';
+      case 'service':
+        return 'Service issue';
+      default:
+        return 'Issue';
+    }
+  }
+
   public formatTimestamp(value: string): string {
     const timestamp = new Date(value);
 
@@ -142,6 +174,21 @@ export class GfChatMessageComponent {
 
   public toggleToolCalls() {
     this.showToolCalls = !this.showToolCalls;
+  }
+
+  private get normalizedErrorType(): ErrorType | 'unknown' {
+    const value = String(this.errorType || '').trim().toLowerCase();
+
+    if (
+      value === 'data' ||
+      value === 'tool' ||
+      value === 'model' ||
+      value === 'service'
+    ) {
+      return value;
+    }
+
+    return 'unknown';
   }
 
   private isStructuredToolCall(name: string): boolean {

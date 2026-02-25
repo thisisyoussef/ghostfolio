@@ -140,6 +140,21 @@ describe('GfChatMessageComponent', () => {
     );
   });
 
+  it('renders classified error chip when assistant message is an error', () => {
+    component.role = 'assistant';
+    component.isError = true;
+    component.errorType = 'tool';
+    component.content = 'Unable to parse tool output.';
+
+    fixture.detectChanges();
+
+    const chip = fixture.debugElement.query(By.css('.error-type-chip'))
+      .nativeElement as HTMLElement;
+
+    expect(chip.textContent).toContain('Tool execution issue');
+    expect(chip.className).toContain('error-tool');
+  });
+
   it('renders structured tool cards inline and keeps raw tool calls collapsed by default', () => {
     component.role = 'assistant';
     component.content = 'Result body';

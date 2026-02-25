@@ -26,7 +26,6 @@ import {
 import { GfChatInputComponent } from './chat-input/chat-input.component';
 import { GfChatMessageComponent } from './chat-message/chat-message.component';
 import { GfSuggestedActionsComponent } from './suggested-actions/suggested-actions.component';
-import { GfToolResultCardComponent } from './tool-result-card/tool-result-card.component';
 import { GfWelcomePanelComponent } from './welcome-panel/welcome-panel.component';
 
 interface ToolCall {
@@ -57,13 +56,15 @@ interface VerificationSummary {
   generatedAt: string;
 }
 
+type ClassifiedErrorType = 'data' | 'tool' | 'model' | 'service';
+
 interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   toolCalls?: ToolCall[];
   verification?: VerificationSummary;
   isError?: boolean;
-  errorType?: string;
+  errorType?: ClassifiedErrorType;
 }
 
 interface ChatResponse {
@@ -72,7 +73,7 @@ interface ChatResponse {
   session_id: string;
   verification?: VerificationSummary;
   is_error?: boolean;
-  error_type?: string;
+  error_type?: ClassifiedErrorType;
 }
 
 @Component({
@@ -83,7 +84,6 @@ interface ChatResponse {
     GfChatInputComponent,
     GfChatMessageComponent,
     GfSuggestedActionsComponent,
-    GfToolResultCardComponent,
     GfWelcomePanelComponent
   ],
   schemas: [CUSTOM_ELEMENTS_SCHEMA],
@@ -146,17 +146,19 @@ export class GfAgentPageComponent implements AfterViewChecked {
             content: response.response,
             toolCalls: response.tool_calls,
             verification: response.verification,
-            isError: response.is_error,
-            errorType: response.error_type
+            isError: response.is_error === true,
+            errorType: this.normalizeErrorType(response.error_type)
           });
           this.isLoading = false;
           this.shouldScroll = true;
           this.changeDetectorRef.markForCheck();
         },
-        error: (error) => {
+        error: () => {
           this.messages.push({
             role: 'assistant',
-            content: `Error: ${error.message || 'Something went wrong. Please try again.'}`
+            content: 'A temporary service issue occurred. Please try again in a moment.',
+            isError: true,
+            errorType: 'service'
           });
           this.isLoading = false;
           this.shouldScroll = true;
@@ -172,5 +174,20 @@ export class GfAgentPageComponent implements AfterViewChecked {
         el.scrollTop = el.scrollHeight;
       }
     } catch {}
+  }
+
+  private normalizeErrorType(
+    errorType: string | undefined
+  ): ClassifiedErrorType | undefined {
+    if (
+      errorType === 'data' ||
+      errorType === 'tool' ||
+      errorType === 'model' ||
+      errorType === 'service'
+    ) {
+      return errorType;
+    }
+
+    return undefined;
   }
 }

@@ -142,7 +142,7 @@ export const routes: Routes = [
         (c) => c.GfAgentPageComponent
       ),
     path: 'agent',
-    title: 'Market Data Agent'
+    title: 'Portfolio Assistant'
   },
   {
     // wildcard, if requested url doesn't match any paths for routes defined

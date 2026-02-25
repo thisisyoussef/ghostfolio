@@ -90,4 +90,44 @@ describe('GfAgentPageComponent', () => {
       verification
     );
   });
+
+  it('maps backend is_error and error_type into assistant message state', () => {
+    component.sendMessage('Analyze my portfolio risk');
+
+    const request = httpMock.expectOne('/api/v1/agent/chat');
+    request.flush({
+      response: 'Unable to safely verify tool outputs.',
+      tool_calls: [],
+      session_id: component.sessionId,
+      is_error: true,
+      error_type: 'data'
+    });
+
+    fixture.detectChanges();
+
+    expect(component.messages).toHaveLength(2);
+    expect(component.messages[1].isError).toBe(true);
+    expect(component.messages[1].errorType).toBe('data');
+
+    const messageComponents = fixture.debugElement.queryAll(
+      By.directive(GfChatMessageComponent)
+    );
+    expect(messageComponents[1].componentInstance.isError).toBe(true);
+    expect(messageComponents[1].componentInstance.errorType).toBe('data');
+  });
+
+  it('creates classified service error message for transport failures', () => {
+    component.sendMessage('Price of AAPL');
+
+    const request = httpMock.expectOne('/api/v1/agent/chat');
+    request.error(new ProgressEvent('error'));
+    fixture.detectChanges();
+
+    expect(component.messages).toHaveLength(2);
+    expect(component.messages[1].isError).toBe(true);
+    expect(component.messages[1].errorType).toBe('service');
+    expect(component.messages[1].content).toContain(
+      'A temporary service issue occurred'
+    );
+  });
 });
