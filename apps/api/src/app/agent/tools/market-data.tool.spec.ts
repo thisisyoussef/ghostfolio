@@ -143,6 +143,18 @@ describe('marketDataFetch', () => {
     expect(result['AAPL'].price).toBeUndefined();
   });
 
+  it('should abort fetch after timeout (AbortError)', async () => {
+    const abortError = new DOMException('The operation was aborted', 'AbortError');
+    mockFetch.mockRejectedValue(abortError);
+
+    const result = await marketDataFetch({ symbols: ['AAPL'] });
+
+    expect(result).toHaveProperty('AAPL');
+    expect(result['AAPL'].error).toBeDefined();
+    expect(result['AAPL'].error).toMatch(/failed to fetch/i);
+    expect(result['AAPL'].price).toBeUndefined();
+  });
+
   it('should handle HTTP 429 rate limit response', async () => {
     mockFetch.mockResolvedValue({
       ok: false,

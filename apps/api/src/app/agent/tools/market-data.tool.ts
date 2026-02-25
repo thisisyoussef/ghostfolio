@@ -10,17 +10,23 @@ export interface MarketDataOutput {
   error?: string;
 }
 
+const FETCH_TIMEOUT_MS = 10_000; // 10 second timeout per symbol
+
 async function fetchSingle(symbol: string): Promise<MarketDataOutput> {
   // Use Yahoo Finance v8 chart API directly via native fetch.
   // The yahoo-finance2 library's cookie/crumb handling fails in containerized
   // environments (Railway). Direct fetch with proper User-Agent works reliably.
   const url = `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=1d`;
   try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
     const response = await fetch(url, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (compatible; ghostfolio-agent/1.0)'
-      }
+      },
+      signal: controller.signal
     });
+    clearTimeout(timeout);
     if (!response.ok) {
       return { symbol, error: `Yahoo Finance returned ${response.status} for ${symbol}` };
     }

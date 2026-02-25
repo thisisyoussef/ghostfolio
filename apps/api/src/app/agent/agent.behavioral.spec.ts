@@ -216,8 +216,10 @@ describe('AgentService — Behavioral Tests (Layer 3)', () => {
       symbols: ['XYZNOTREAL']
     });
 
-    // Response must mention the symbol
+    // Response must mention the symbol in a user-friendly way
     expect(result.response).toContain('XYZNOTREAL');
+    // Should use natural language, not raw error strings
+    expect(result.response).not.toMatch(/Failed to fetch data for/);
 
     // Response must NOT be the generic fallback
     expect(result.response).not.toContain('I can help you with');

@@ -156,15 +156,34 @@ export class AgentService {
         }
       ];
 
-      const parts: string[] = [];
+      const successParts: string[] = [];
+      const failedSymbols: string[] = [];
       for (const symbol of symbols) {
         const data = marketData[symbol];
         if (data.error) {
-          parts.push(`${symbol}: ${data.error}`);
+          failedSymbols.push(symbol);
         } else {
           const priceStr = data.price ? `$${data.price.toFixed(2)}` : 'N/A';
           const nameStr = data.name ? ` (${data.name})` : '';
-          parts.push(`${symbol}${nameStr}: ${priceStr}`);
+          successParts.push(`${symbol}${nameStr}: ${priceStr}`);
+        }
+      }
+
+      const parts: string[] = [...successParts];
+      if (failedSymbols.length > 0) {
+        const symbolList = failedSymbols.join(', ');
+        if (failedSymbols.length === symbols.length) {
+          // All symbols failed
+          parts.push(
+            `I wasn't able to retrieve market data for ${symbolList} right now. ` +
+              'The data provider may be temporarily unavailable — please try again in a moment.'
+          );
+        } else {
+          // Partial failure
+          parts.push(
+            `\nNote: I couldn't fetch data for ${symbolList} at this time. ` +
+              'The data provider may be temporarily unavailable for these symbols.'
+          );
         }
       }
 
@@ -175,10 +194,14 @@ export class AgentService {
         lastTopic: null
       });
 
+      const allFailed =
+        failedSymbols.length > 0 && failedSymbols.length === symbols.length;
+
       return {
         response: parts.join('\n'),
         toolCalls,
-        sessionId
+        sessionId,
+        ...(allFailed && { isError: true, errorType: ErrorType.DATA })
       };
     } catch (err) {
       const classified =
