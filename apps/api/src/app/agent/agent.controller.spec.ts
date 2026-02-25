@@ -186,4 +186,136 @@ describe('AgentController (integration)', () => {
     expect(toolResult).toHaveProperty('complianceScore');
     expect(toolResult).toHaveProperty('totalChecked');
   });
+
+  // --- Layer 2: Memory integration tests ---
+
+  it('should carry context: "how about MSFT?" after AAPL uses same session', async () => {
+    const originalFetch = global.fetch;
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        chart: {
+          result: [{ meta: { regularMarketPrice: 150, shortName: 'Test' } }]
+        }
+      })
+    });
+
+    try {
+      await controller.chat({
+        message: 'Price of AAPL',
+        session_id: 'memory-test'
+      });
+      const result = await controller.chat({
+        message: 'How about MSFT?',
+        session_id: 'memory-test'
+      });
+
+      expect(result.tool_calls).toHaveLength(1);
+      expect(result.tool_calls[0].name).toBe('market_data_fetch');
+      const toolResult = JSON.parse(result.tool_calls[0].result);
+      expect(toolResult).toHaveProperty('MSFT');
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  it('should not carry context across different session_ids', async () => {
+    const originalFetch = global.fetch;
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        chart: {
+          result: [{ meta: { regularMarketPrice: 150, shortName: 'Test' } }]
+        }
+      })
+    });
+
+    try {
+      await controller.chat({
+        message: 'Price of AAPL',
+        session_id: 'session-A'
+      });
+      const result = await controller.chat({
+        message: 'How about it?',
+        session_id: 'session-B'
+      });
+
+      expect(result.tool_calls).toHaveLength(0);
+      expect(result.response).toContain('I can help you with');
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  it('should include is_error and error_type when portfolio service fails', async () => {
+    const failController = await buildModule(new FailingPortfolioService());
+    const result = await failController.chat({
+      message: "What's my portfolio risk?",
+      session_id: 'error-test'
+    });
+
+    expect(result.is_error).toBe(true);
+    expect(result.error_type).toBeDefined();
+    expect(result.response).toBeTruthy();
+  });
+
+  it('should include session_id in error responses', async () => {
+    const failController = await buildModule(new FailingPortfolioService());
+    const result = await failController.chat({
+      message: "What's my portfolio concentration?",
+      session_id: 'err-session-echo'
+    });
+
+    expect(result.session_id).toBe('err-session-echo');
+  });
+
+  it('should not leak stack traces in any error response', async () => {
+    const failController = await buildModule(new FailingPortfolioService());
+    const result = await failController.chat({
+      message: 'Check my portfolio allocation',
+      session_id: 'no-stack'
+    });
+
+    expect(result.response).not.toMatch(/at\s+\w+\s+\(/);
+    expect(result.response).not.toContain('.ts:');
+  });
+
+  // --- Layer 4: Contract tests ---
+
+  it('should return error response matching { is_error, error_type, session_id } shape', async () => {
+    const failController = await buildModule(new FailingPortfolioService());
+    const result = await failController.chat({
+      message: "What's my portfolio risk?",
+      session_id: 'contract-error'
+    });
+
+    expect(typeof result.response).toBe('string');
+    expect(typeof result.is_error).toBe('boolean');
+    expect(typeof result.error_type).toBe('string');
+    expect(['data', 'tool', 'model', 'service']).toContain(result.error_type);
+    expect(Array.isArray(result.tool_calls)).toBe(true);
+    expect(typeof result.session_id).toBe('string');
+  });
+
+  it('should omit is_error and error_type on success responses', async () => {
+    const result = await controller.chat({
+      message: 'Is my portfolio ESG compliant?',
+      session_id: 'contract-success'
+    });
+
+    expect(result.is_error).toBeUndefined();
+    expect(result.error_type).toBeUndefined();
+  });
+
+  it('should never return raw stack trace or internal error details to client', async () => {
+    const failController = await buildModule(new FailingPortfolioService());
+    const result = await failController.chat({
+      message: 'Check ESG compliance',
+      session_id: 'contract-no-stack'
+    });
+
+    expect(result.response).not.toContain('node_modules');
+    expect(result.response).not.toContain('at Object.');
+    expect(result.response).not.toContain('TypeError');
+  });
 });
