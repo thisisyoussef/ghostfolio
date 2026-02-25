@@ -93,15 +93,18 @@ const SCENARIO_KEYWORDS = [
   'bps',
   'breakeven',
   'drawdown',
+  'duration',
   'expected shortfall',
   'market correction',
   'rate cut',
   'rate hike',
   'rate sensitivity',
   'scenario',
+  'shorter duration',
   'shortfall',
   'stress test',
   'value at risk',
+  'yield curve',
   'var',
   'what if'
 ];
@@ -150,6 +153,12 @@ const COMMON_SYMBOL_FALSE_POSITIVES = new Set([
   'SHOW',
   'SO',
   'STOCK',
+  'SHOULD',
+  'SHIFT',
+  'SHORTER',
+  'DURATION',
+  'YIELD',
+  'CURVE',
   'TELL',
   'THE',
   'TO',
@@ -1122,7 +1131,8 @@ export class DeterministicAgentService {
       new Set(
         potentialSymbols.filter(
           (symbol) =>
-            !COMMON_SYMBOL_FALSE_POSITIVES.has(symbol) && symbol.length >= 2
+            !COMMON_SYMBOL_FALSE_POSITIVES.has(symbol) &&
+            symbol.length >= 2
         )
       )
     );
@@ -1244,6 +1254,29 @@ export class DeterministicAgentService {
 
     if (assistantMentionsRisk && wantsBoth) {
       return 'combined';
+    }
+
+    const lastUserAskedQuestion =
+      (lastUser?.content || '').includes('?') ||
+      /\b(should i|do i|can i)\b/.test((lastUser?.content || '').toLowerCase());
+    const lastUserText = (lastUser?.content || '').toLowerCase();
+
+    if (lastUserAskedQuestion) {
+      if (isScenarioQuestion(lastUserText)) {
+        return 'scenario';
+      }
+
+      if (isEsgQuestion(lastUserText) && isRiskIntentQuestion(lastUserText)) {
+        return 'combined';
+      }
+
+      if (isEsgQuestion(lastUserText)) {
+        return 'compliance';
+      }
+
+      if (isPortfolioQuestion(lastUserText) || isRiskIntentQuestion(lastUserText)) {
+        return 'portfolio';
+      }
     }
 
     if (assistantOfferedFollowUp && assistantMentionsScenario) {

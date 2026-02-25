@@ -147,6 +147,35 @@ describe('DeterministicAgentService', () => {
     );
   });
 
+  it('should route yield-curve duration follow-up to scenario_analysis instead of market_data_fetch', async () => {
+    await sessionMemory.appendMessages(TEST_USER, TEST_SESSION, [
+      {
+        content:
+          'How do recent interest rate changes affect my bond holdings?',
+        createdAt: Date.now() - 3_000,
+        role: 'user'
+      },
+      {
+        content: 'Scenario analysis complete. Duration risk is elevated.',
+        createdAt: Date.now() - 2_000,
+        role: 'assistant'
+      }
+    ]);
+
+    const response = await service.chat({
+      message:
+        "What's the current yield curve telling us, and should I shift to shorter duration?",
+      sessionId: TEST_SESSION,
+      userId: TEST_USER
+    });
+
+    expect(response.toolCalls).toHaveLength(1);
+    expect(response.toolCalls[0].name).toBe('scenario_analysis');
+    expect(response.toolCalls.map((toolCall) => toolCall.name)).not.toContain(
+      'market_data_fetch'
+    );
+  });
+
   it('should scope compliance to explicit requested holdings symbols', async () => {
     const response = await service.chat({
       message: 'ESG score for ABC and DEF specifically',
@@ -234,6 +263,34 @@ describe('DeterministicAgentService', () => {
     expect(response.toolCalls).toHaveLength(1);
     expect(response.toolCalls[0].name).toBe('portfolio_risk_analysis');
     expect(response.response).toContain('Rebalancing Suggestions');
+    expect(response.response).not.toContain('I can help you with');
+  });
+
+  it('should resolve short "yes" follow-up using the prior user question context', async () => {
+    await sessionMemory.appendMessages(TEST_USER, TEST_SESSION, [
+      {
+        content:
+          'The top three drivers are concentrated tech exposure, currency risk, and high-yield bond duration. Should I rebalance?',
+        createdAt: Date.now() - 2_000,
+        role: 'user'
+      },
+      {
+        content: 'Top holding concentration remains moderate based on current data.',
+        createdAt: Date.now() - 1_000,
+        role: 'assistant'
+      }
+    ]);
+
+    const response = await service.chat({
+      message: 'yes',
+      sessionId: TEST_SESSION,
+      userId: TEST_USER
+    });
+
+    expect(response.toolCalls).toHaveLength(1);
+    expect(['portfolio_risk_analysis', 'scenario_analysis']).toContain(
+      response.toolCalls[0].name
+    );
     expect(response.response).not.toContain('I can help you with');
   });
 

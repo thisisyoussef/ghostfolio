@@ -62,26 +62,6 @@ const SYMBOL_BLOCKLIST = new Set([
   'YIELD'
 ]);
 
-const LONG_ALPHA_SYMBOL_ALLOWLIST = new Set([
-  'BITCOIN',
-  'ETHEREUM',
-  'DOGECOIN',
-  'SOLANA',
-  'CARDANO'
-]);
-
-function isLikelyNaturalLanguageSymbol(symbol: string): boolean {
-  if (!/^[A-Z]+$/.test(symbol)) {
-    return false;
-  }
-
-  if (symbol.length <= 5) {
-    return false;
-  }
-
-  return !LONG_ALPHA_SYMBOL_ALLOWLIST.has(symbol);
-}
-
 const MAX_SYMBOL_LENGTH = 12;
 const MIN_SYMBOL_LENGTH = 1;
 
@@ -359,7 +339,6 @@ export class AgentToolRegistry {
           )
           .filter((symbol) => /^[A-Z0-9][A-Z0-9.\-]*$/.test(symbol))
           .filter((symbol) => !COMMON_SYMBOL_FALSE_POSITIVES.has(symbol))
-          .filter((symbol) => !isLikelyNaturalLanguageSymbol(symbol))
           .filter((symbol) => !SYMBOL_BLOCKLIST.has(symbol))
       )
     );
