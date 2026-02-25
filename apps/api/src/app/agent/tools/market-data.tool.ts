@@ -38,6 +38,8 @@ const DEFAULT_DISCREPANCY_THRESHOLD_PCT = 5;
 const DEFAULT_BACKUP_SOURCE_TIMEOUT_MS = 4_000;
 const DEFAULT_PRIMARY_RETRY_ATTEMPTS = 2;
 const DEFAULT_PRIMARY_RETRY_BACKOFF_MS = 150;
+const DEFAULT_SYMBOL_RETRY_ATTEMPTS = 2;
+const DEFAULT_SYMBOL_RETRY_BACKOFF_MS = 250;
 const YAHOO_SOURCE = 'Yahoo Finance (chart v8)';
 const YAHOO_CHART_HOSTS = ['query2.finance.yahoo.com', 'query1.finance.yahoo.com'];
 const RETRYABLE_HTTP_STATUS_CODES = new Set([408, 425, 429, 500, 502, 503, 504]);
@@ -79,6 +81,25 @@ function getPrimaryRetryBackoffMs(): number {
     readNumberEnv(
       'AGENT_MARKET_PRIMARY_RETRY_BACKOFF_MS',
       DEFAULT_PRIMARY_RETRY_BACKOFF_MS
+    )
+  );
+
+  return Math.max(1, backoff);
+}
+
+function getSymbolRetryAttempts(): number {
+  const attempts = Math.floor(
+    readNumberEnv('AGENT_MARKET_SYMBOL_RETRY_ATTEMPTS', DEFAULT_SYMBOL_RETRY_ATTEMPTS)
+  );
+
+  return Math.max(1, attempts);
+}
+
+function getSymbolRetryBackoffMs(): number {
+  const backoff = Math.floor(
+    readNumberEnv(
+      'AGENT_MARKET_SYMBOL_RETRY_BACKOFF_MS',
+      DEFAULT_SYMBOL_RETRY_BACKOFF_MS
     )
   );
 
@@ -583,8 +604,23 @@ async function fetchSingle(symbol: string): Promise<MarketDataOutput> {
     }
   });
 
+  const resolvedPrimaryPrice = hasPrimaryPrice ? primary.price : undefined;
+  const resolvedPrice =
+    resolvedPrimaryPrice ??
+    (hasBackupPrice ? (backup.price as number) : undefined);
+  const primaryUnavailableReason =
+    !hasPrimaryPrice && typeof primary.error === 'string'
+      ? primary.error
+      : undefined;
+
   return {
     ...primary,
+    ...(resolvedPrice !== undefined ? { price: resolvedPrice } : {}),
+    ...(resolvedPrice !== undefined
+      ? {}
+      : primaryUnavailableReason
+        ? { error: primaryUnavailableReason }
+        : {}),
     ...(hasBackupPrice ? { backupPrice: backup.price } : {}),
     backupSource: backup.source,
     ...(discrepancyPct !== undefined
@@ -595,6 +631,49 @@ async function fetchSingle(symbol: string): Promise<MarketDataOutput> {
   };
 }
 
+function shouldRetrySymbol(output: MarketDataOutput): boolean {
+  if (typeof output.price === 'number' && Number.isFinite(output.price)) {
+    return false;
+  }
+
+  if (!output.error) {
+    return false;
+  }
+
+  const reason = output.error.toLowerCase();
+
+  if (reason.includes('no data returned')) {
+    return false;
+  }
+
+  return /(timeout|fetch error|failed to fetch|429|500|502|503|504|network|socket|temporarily unavailable)/.test(
+    reason
+  );
+}
+
+async function fetchSingleWithRetry(symbol: string): Promise<MarketDataOutput> {
+  const attempts = getSymbolRetryAttempts();
+  const backoffMs = getSymbolRetryBackoffMs();
+  let latest: MarketDataOutput | undefined;
+
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    latest = await fetchSingle(symbol);
+
+    if (!shouldRetrySymbol(latest) || attempt >= attempts) {
+      return latest;
+    }
+
+    await sleep(backoffMs * attempt);
+  }
+
+  return (
+    latest || {
+      symbol,
+      error: `Failed to fetch data for ${symbol}: unknown error`
+    }
+  );
+}
+
 export async function marketDataFetch(input: {
   symbols: string[];
 }): Promise<Record<string, MarketDataOutput>> {
@@ -603,7 +682,7 @@ export async function marketDataFetch(input: {
 
   await Promise.all(
     symbols.map(async (symbol) => {
-      results[symbol] = await fetchSingle(symbol);
+      results[symbol] = await fetchSingleWithRetry(symbol);
     })
   );
 

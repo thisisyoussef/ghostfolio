@@ -24,17 +24,115 @@ const SYMBOL_BLOCKLIST = new Set([
   'ADD',
   'ALL',
   'AND',
+  'ASK',
   'BOTH',
+  'CAN',
+  'COMPARE',
+  'COMPARISON',
+  'CURRENT',
+  'CURVE',
+  'DURATION',
   'ESG',
+  'FOR',
   'GET',
+  'GIVE',
+  'GO',
   'HELP',
+  'HOW',
+  'I',
+  'IS',
+  'ME',
+  'NOW',
+  'OF',
   'NOW',
   'OK',
+  'OR',
   'PLEASE',
+  'PROCEED',
+  'SHIFT',
+  'SHOULD',
+  'SHORTER',
+  'TELLING',
+  'THREE',
+  'TO',
+  'US',
+  'WHAT',
+  'WITH',
+  'YES',
+  'YIELD'
+]);
+
+const LONG_ALPHA_SYMBOL_ALLOWLIST = new Set([
+  'BITCOIN',
+  'ETHEREUM',
+  'DOGECOIN',
+  'SOLANA',
+  'CARDANO'
+]);
+
+function isLikelyNaturalLanguageSymbol(symbol: string): boolean {
+  if (!/^[A-Z]+$/.test(symbol)) {
+    return false;
+  }
+
+  if (symbol.length <= 5) {
+    return false;
+  }
+
+  return !LONG_ALPHA_SYMBOL_ALLOWLIST.has(symbol);
+}
+
+const MAX_SYMBOL_LENGTH = 12;
+const MIN_SYMBOL_LENGTH = 1;
+
+const EXTRA_STRIP_CHARS = /[.,;:!?()[\]{}'"`]/g;
+
+function normalizeCandidateSymbol(symbol: string): string {
+  return symbol.trim().toUpperCase().replace(EXTRA_STRIP_CHARS, '');
+}
+
+const COMMON_SYMBOL_FALSE_POSITIVES = new Set([
+  'ADD',
+  'ALL',
+  'AND',
+  'ASK',
+  'BOTH',
+  'CAN',
+  'COMPARE',
+  'COMPARISON',
+  'CURRENT',
+  'CURVE',
+  'DURATION',
+  'ESG',
+  'FOR',
+  'GET',
+  'GIVE',
+  'GO',
+  'HELP',
+  'HOW',
+  'I',
+  'IS',
+  'ME',
+  'NOW',
+  'OF',
+  'OK',
+  'OR',
+  'PLEASE',
+  'PROCEED',
   'SHOW',
+  'SHIFT',
+  'SHOULD',
+  'SHORTER',
+  'TELLING',
   'THEN',
+  'THREE',
+  'TO',
+  'US',
   'VAR',
-  'YES'
+  'WHAT',
+  'WITH',
+  'YES',
+  'YIELD'
 ]);
 
 const TOOL_DEFINITIONS: ToolDefinition[] = [
@@ -253,9 +351,15 @@ export class AgentToolRegistry {
     return Array.from(
       new Set(
         symbols
-          .map((symbol) => symbol.trim().toUpperCase())
-          .filter((symbol) => symbol.length >= 1 && symbol.length <= 12)
+          .map(normalizeCandidateSymbol)
+          .filter(
+            (symbol) =>
+              symbol.length >= MIN_SYMBOL_LENGTH &&
+              symbol.length <= MAX_SYMBOL_LENGTH
+          )
           .filter((symbol) => /^[A-Z0-9][A-Z0-9.\-]*$/.test(symbol))
+          .filter((symbol) => !COMMON_SYMBOL_FALSE_POSITIVES.has(symbol))
+          .filter((symbol) => !isLikelyNaturalLanguageSymbol(symbol))
           .filter((symbol) => !SYMBOL_BLOCKLIST.has(symbol))
       )
     );

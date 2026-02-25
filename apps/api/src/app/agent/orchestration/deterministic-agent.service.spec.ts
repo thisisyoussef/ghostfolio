@@ -215,6 +215,28 @@ describe('DeterministicAgentService', () => {
     expect(response.response).not.toContain('I can help you with');
   });
 
+  it('should resolve short "yes" follow-up against prior assistant action question', async () => {
+    await sessionMemory.appendMessages(TEST_USER, TEST_SESSION, [
+      {
+        content:
+          'Risk: medium concentration. I can suggest rebalancing steps from here. Should I proceed?',
+        createdAt: Date.now() - 2_000,
+        role: 'assistant'
+      }
+    ]);
+
+    const response = await service.chat({
+      message: 'yes',
+      sessionId: TEST_SESSION,
+      userId: TEST_USER
+    });
+
+    expect(response.toolCalls).toHaveLength(1);
+    expect(response.toolCalls[0].name).toBe('portfolio_risk_analysis');
+    expect(response.response).toContain('Rebalancing Suggestions');
+    expect(response.response).not.toContain('I can help you with');
+  });
+
   it('should route exposure-style risk prompts to portfolio_risk_analysis', async () => {
     const response = await service.chat({
       message: 'Oil prices just spiked. How exposed am I?',

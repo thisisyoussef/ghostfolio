@@ -160,7 +160,7 @@ const COMMON_SYMBOL_FALSE_POSITIVES = new Set([
   'WHAT'
 ]);
 
-type ContinuationIntent = 'combined' | 'compliance' | 'portfolio';
+type ContinuationIntent = 'combined' | 'compliance' | 'portfolio' | 'scenario';
 
 const CONTINUATION_PROMPTS: Record<ContinuationIntent, string> = {
   combined:
@@ -168,7 +168,9 @@ const CONTINUATION_PROMPTS: Record<ContinuationIntent, string> = {
   compliance:
     'Which flagged holdings have the biggest ESG impact, and what would my score be if all flagged offenders were removed?',
   portfolio:
-    'What is my overall portfolio risk level, and what rebalancing suggestions should I consider?'
+    'What is my overall portfolio risk level, and what rebalancing suggestions should I consider?',
+  scenario:
+    'Run a scenario analysis with stress-test assumptions and summarize the key action to take.'
 };
 
 export function isEsgQuestion(message: string): boolean {
@@ -379,6 +381,15 @@ export class DeterministicAgentService {
 
       if (continuationIntent === 'compliance') {
         return this.handleComplianceQuestion(
+          continuationMessage,
+          sessionId,
+          userId,
+          input.requestId
+        );
+      }
+
+      if (continuationIntent === 'scenario') {
+        return this.handleScenarioQuestion(
           continuationMessage,
           sessionId,
           userId,
@@ -1187,6 +1198,7 @@ export class DeterministicAgentService {
     ]
       .join('\n')
       .toLowerCase();
+    const assistantText = (lastAssistant?.content || '').toLowerCase();
 
     const assistantMentionsEsg =
       /(esg|offender|compliance|score)/.test(continuationContextText);
@@ -1194,10 +1206,18 @@ export class DeterministicAgentService {
       /(risk|rebalanc|portfolio|concentration|exposure|volatility|hedge)/.test(
         continuationContextText
       );
+    const assistantMentionsScenario =
+      /(scenario|stress|shortfall|drawdown|basis points?|bps|rate|duration|var|value at risk)/.test(
+        continuationContextText
+      );
     const assistantAskedChoice =
       /(did you mean|both of the above|all of the above|would you like|choose|clarification|are you asking)/.test(
         continuationContextText
       );
+    const assistantOfferedFollowUp =
+      /\b(should i|would you like|do you want|shall i|proceed|next step|go ahead)\b/.test(
+        assistantText
+      ) || assistantText.includes('?');
 
     if (assistantAskedChoice && assistantMentionsEsg && assistantMentionsRisk) {
       if (wantsBoth || this.isShortAffirmation(message)) {
@@ -1224,6 +1244,22 @@ export class DeterministicAgentService {
 
     if (assistantMentionsRisk && wantsBoth) {
       return 'combined';
+    }
+
+    if (assistantOfferedFollowUp && assistantMentionsScenario) {
+      return 'scenario';
+    }
+
+    if (assistantOfferedFollowUp && assistantMentionsEsg && assistantMentionsRisk) {
+      return 'combined';
+    }
+
+    if (assistantOfferedFollowUp && assistantMentionsEsg) {
+      return 'compliance';
+    }
+
+    if (assistantOfferedFollowUp && assistantMentionsRisk) {
+      return 'portfolio';
     }
 
     return null;
