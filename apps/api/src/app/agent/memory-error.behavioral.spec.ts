@@ -3,12 +3,15 @@ jest.mock('@ghostfolio/api/app/portfolio/portfolio.service', () => ({
 }));
 
 import { PortfolioService } from '@ghostfolio/api/app/portfolio/portfolio.service';
+import { ConfigurationService } from '@ghostfolio/api/services/configuration/configuration.service';
+import { PropertyService } from '@ghostfolio/api/services/property/property.service';
 import { Test } from '@nestjs/testing';
 import { REQUEST } from '@nestjs/core';
 
 import { AgentController } from './agent.controller';
 import { AgentService } from './agent.service';
 import { SessionMemoryService } from './memory/session-memory.service';
+import { AgentObservabilityService } from './observability/agent-observability.service';
 import {
   TestPortfolioService,
   FailingPortfolioService,
@@ -25,7 +28,66 @@ describe('Agent Memory & Error Behavior (Layer 3)', () => {
       controllers: [AgentController],
       providers: [
         AgentService,
+        {
+          provide: ConfigurationService,
+          useValue: {
+            get: jest.fn((key: string) => {
+              if (key === 'ENABLE_FEATURE_AGENT_CHAT_DEMO_MODE') {
+                return false;
+              }
+
+              return undefined;
+            })
+          }
+        },
+        {
+          provide: PropertyService,
+          useValue: {
+            getByKey: jest.fn().mockResolvedValue(undefined)
+          }
+        },
         { provide: SessionMemoryService, useValue: new SessionMemoryService() },
+        {
+          provide: AgentObservabilityService,
+          useValue: {
+            getMetricsSnapshot: jest.fn().mockReturnValue({
+              errors: {},
+              feedback: {
+                down: 0,
+                total: 0,
+                up: 0
+              },
+              generatedAt: new Date().toISOString(),
+              latencyMs: {
+                avg: {
+                  reasoningMs: 0,
+                  toolMs: 0,
+                  totalMs: 0
+                },
+                p95: {
+                  reasoningMs: 0,
+                  toolMs: 0,
+                  totalMs: 0
+                }
+              },
+              tokens: {
+                input: 0,
+                output: 0,
+                requestsWithUsage: 0,
+                total: 0
+              },
+              tools: {},
+              totals: {
+                error: 0,
+                requests: 0,
+                success: 0
+              }
+            }),
+            listFeedback: jest.fn().mockResolvedValue([]),
+            recordChatOutcome: jest.fn().mockResolvedValue(undefined),
+            submitFeedback: jest.fn()
+          }
+        },
         { provide: PortfolioService, useValue: portfolioService },
         { provide: REQUEST, useValue: { user: { id: TEST_USER_ID } } }
       ]

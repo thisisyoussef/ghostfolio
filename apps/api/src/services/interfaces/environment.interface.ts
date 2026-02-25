@@ -7,6 +7,8 @@ export interface Environment extends CleanedEnvAccessors {
   AGENT_MEMORY_RECENT_MESSAGES: number;
   AGENT_MEMORY_TTL_SECONDS: number;
   AGENT_MODEL_TIMEOUT_MS: number;
+  AGENT_MARKET_DISCREPANCY_THRESHOLD_PCT: number;
+  AGENT_BACKUP_SOURCE_TIMEOUT_MS: number;
   ANTHROPIC_API_KEY: string;
   ACCESS_TOKEN_SALT: string;
   API_KEY_ALPHA_VANTAGE: string;
@@ -23,6 +25,7 @@ export interface Environment extends CleanedEnvAccessors {
   DATA_SOURCE_IMPORT: string;
   DATA_SOURCES: string[];
   DATA_SOURCES_GHOSTFOLIO_DATA_PROVIDER: string[];
+  ENABLE_FEATURE_AGENT_CHAT_DEMO_MODE: boolean;
   ENABLE_FEATURE_AGENT_LANGGRAPH: boolean;
   ENABLE_FEATURE_AUTH_GOOGLE: boolean;
   ENABLE_FEATURE_AUTH_OIDC: boolean;

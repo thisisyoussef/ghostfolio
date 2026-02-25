@@ -6,12 +6,15 @@ jest.mock('@ghostfolio/api/app/portfolio/portfolio.service', () => ({
 }));
 
 import { PortfolioService } from '@ghostfolio/api/app/portfolio/portfolio.service';
+import { ConfigurationService } from '@ghostfolio/api/services/configuration/configuration.service';
+import { PropertyService } from '@ghostfolio/api/services/property/property.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { REQUEST } from '@nestjs/core';
 
 import { AgentController } from './agent.controller';
 import { AgentService } from './agent.service';
 import { SessionMemoryService } from './memory/session-memory.service';
+import { AgentObservabilityService } from './observability/agent-observability.service';
 import {
   TestPortfolioService,
   FailingPortfolioService,
@@ -35,14 +38,46 @@ const TEST_USER_ID = 'test-user-id';
 describe('AgentController (integration)', () => {
   let controller: AgentController;
 
-  async function buildModule(portfolioService: any) {
+  async function buildModule(
+    portfolioService: any,
+    {
+      demoMode = false,
+      demoUserId = 'demo-user-id',
+      requestUserId = TEST_USER_ID
+    }: {
+      demoMode?: boolean;
+      demoUserId?: string;
+      requestUserId?: string | null;
+    } = {}
+  ) {
+    const configurationService = {
+      get: jest.fn((key: string) => {
+        if (key === 'ENABLE_FEATURE_AGENT_CHAT_DEMO_MODE') {
+          return demoMode;
+        }
+
+        return undefined;
+      })
+    };
+    const propertyService = {
+      getByKey: jest.fn().mockResolvedValue(demoUserId)
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       controllers: [AgentController],
       providers: [
         AgentService,
+        AgentObservabilityService,
+        { provide: ConfigurationService, useValue: configurationService },
+        { provide: PropertyService, useValue: propertyService },
         { provide: SessionMemoryService, useValue: new SessionMemoryService() },
         { provide: PortfolioService, useValue: portfolioService },
-        { provide: REQUEST, useValue: { user: { id: TEST_USER_ID } } }
+        {
+          provide: REQUEST,
+          useValue: requestUserId
+            ? { user: { id: requestUserId } }
+            : { user: undefined }
+        }
       ]
     }).compile();
 
@@ -130,6 +165,63 @@ describe('AgentController (integration)', () => {
     expect(result.response).toContain('Please provide a message');
   });
 
+  it('should fall back to demo user when not authenticated and demo mode flag is enabled', async () => {
+    const anonymousController = await buildModule(
+      new TestPortfolioService(makeTestHoldings()),
+      {
+        demoMode: true,
+        demoUserId: 'seeded-demo-user-id',
+        requestUserId: null
+      }
+    );
+    const chatSpy = jest.spyOn((anonymousController as any).agentService, 'chat');
+
+    await anonymousController.chat({
+      message: "What's my portfolio concentration risk?",
+      session_id: 'test-demo-fallback'
+    });
+
+    expect(chatSpy).toHaveBeenCalled();
+    expect((chatSpy.mock.calls[0][0] as any).userId).toBe(
+      'seeded-demo-user-id'
+    );
+  });
+
+  it('should reject anonymous chat when demo mode flag is disabled', async () => {
+    const anonymousController = await buildModule(
+      new TestPortfolioService(makeTestHoldings()),
+      {
+        demoMode: false,
+        requestUserId: null
+      }
+    );
+
+    await expect(
+      anonymousController.chat({
+        message: 'Check my portfolio risk',
+        session_id: 'test-no-demo-fallback'
+      })
+    ).rejects.toThrow('Unauthorized');
+  });
+
+  it('should reject anonymous chat when demo mode is enabled but demo user is not configured', async () => {
+    const anonymousController = await buildModule(
+      new TestPortfolioService(makeTestHoldings()),
+      {
+        demoMode: true,
+        demoUserId: '',
+        requestUserId: null
+      }
+    );
+
+    await expect(
+      anonymousController.chat({
+        message: 'Check my portfolio risk',
+        session_id: 'test-missing-demo-user'
+      })
+    ).rejects.toThrow('Demo account is not configured');
+  });
+
   // --- New integration tests ---
 
   it('should return snake_case field names (tool_calls, session_id) in HTTP response', async () => {
@@ -186,6 +278,115 @@ describe('AgentController (integration)', () => {
     expect(toolResult).toHaveProperty('datasetLastUpdated');
     expect(toolResult).toHaveProperty('complianceScore');
     expect(toolResult).toHaveProperty('totalChecked');
+  });
+
+  it('should include top-level verification metadata when tool calls are present', async () => {
+    const result = await controller.chat({
+      message: 'Is my portfolio ESG compliant?',
+      session_id: 'verification-top-level'
+    });
+
+    expect(result).toHaveProperty('verification');
+    expect(result.verification).toHaveProperty('status');
+    expect(result.verification).toHaveProperty('confidenceScore');
+    expect(result.verification).toHaveProperty('sources');
+  });
+
+  it('should include request_id and observability metadata in chat responses', async () => {
+    const result = await controller.chat({
+      message: 'Is my portfolio ESG compliant?',
+      session_id: 'observability-chat'
+    });
+
+    expect(typeof result.request_id).toBe('string');
+    expect(result.request_id?.length).toBeGreaterThan(0);
+    expect(result).toHaveProperty('observability');
+    expect(result.observability).toHaveProperty('latency');
+    expect(result.observability).toHaveProperty('toolStats');
+  });
+
+  it('should include tool-level verification and source attribution in tool result payload', async () => {
+    const result = await controller.chat({
+      message: 'Run an ESG compliance check on my portfolio',
+      session_id: 'verification-tool-payload'
+    });
+
+    const toolResult = JSON.parse(result.tool_calls[0].result);
+
+    expect(toolResult).toHaveProperty('verification');
+    expect(toolResult).toHaveProperty('sourceAttribution');
+    expect(toolResult.verification).toHaveProperty('confidenceScore');
+    expect(toolResult.sourceAttribution).toHaveProperty('primary');
+  });
+
+  it('should accept feedback for a chat response and return feedback DTO', async () => {
+    const chat = await controller.chat({
+      message: 'Is my portfolio ESG compliant?',
+      session_id: 'feedback-session'
+    });
+
+    const feedback = await controller.feedback({
+      note: 'helpful',
+      rating: 'up',
+      request_id: String(chat.request_id),
+      session_id: chat.session_id
+    });
+
+    expect(typeof feedback.id).toBe('string');
+    expect(feedback.rating).toBe('up');
+    expect(feedback.note).toBe('helpful');
+    expect(feedback.request_id).toBe(chat.request_id);
+    expect(feedback.session_id).toBe(chat.session_id);
+    expect(typeof feedback.created_at).toBe('string');
+  });
+
+  it('should list feedback entries filtered by request_id', async () => {
+    const chat = await controller.chat({
+      message: 'Is my portfolio ESG compliant?',
+      session_id: 'feedback-list-session'
+    });
+
+    await controller.feedback({
+      rating: 'down',
+      request_id: String(chat.request_id),
+      session_id: chat.session_id
+    });
+
+    const feedback = await controller.listFeedback(
+      String(chat.request_id),
+      undefined,
+      '10'
+    );
+
+    expect(feedback.length).toBeGreaterThanOrEqual(1);
+    expect(feedback[0].request_id).toBe(chat.request_id);
+  });
+
+  it('should reject invalid feedback payloads', async () => {
+    await expect(
+      controller.feedback({
+        rating: 'neutral' as 'up',
+        request_id: 'req',
+        session_id: 'sess'
+      })
+    ).rejects.toThrow();
+  });
+
+  it('should return metrics snapshot with stable contract', async () => {
+    await controller.chat({
+      message: 'Is my portfolio ESG compliant?',
+      session_id: 'metrics-session'
+    });
+
+    const metrics = await controller.metrics();
+
+    expect(metrics).toHaveProperty('totals');
+    expect(metrics).toHaveProperty('latencyMs');
+    expect(metrics).toHaveProperty('tokens');
+    expect(metrics).toHaveProperty('tools');
+    expect(metrics).toHaveProperty('errors');
+    expect(metrics).toHaveProperty('feedback');
+    expect(typeof metrics.totals.requests).toBe('number');
   });
 
   // --- Layer 2: Memory integration tests ---

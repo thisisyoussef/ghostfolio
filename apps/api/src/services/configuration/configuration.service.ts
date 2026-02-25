@@ -27,6 +27,8 @@ export class ConfigurationService {
       AGENT_MEMORY_RECENT_MESSAGES: num({ default: 12 }),
       AGENT_MEMORY_TTL_SECONDS: num({ default: 604800 }),
       AGENT_MODEL_TIMEOUT_MS: num({ default: 12000 }),
+      AGENT_MARKET_DISCREPANCY_THRESHOLD_PCT: num({ default: 5 }),
+      AGENT_BACKUP_SOURCE_TIMEOUT_MS: num({ default: 4000 }),
       ANTHROPIC_API_KEY: str({
         default: undefined,
         requiredWhen: (env) => {
@@ -52,6 +54,7 @@ export class ConfigurationService {
       DATA_SOURCES_GHOSTFOLIO_DATA_PROVIDER: json({
         default: []
       }),
+      ENABLE_FEATURE_AGENT_CHAT_DEMO_MODE: bool({ default: false }),
       ENABLE_FEATURE_AUTH_GOOGLE: bool({ default: false }),
       ENABLE_FEATURE_AGENT_LANGGRAPH: bool({ default: false }),
       ENABLE_FEATURE_AUTH_OIDC: bool({ default: false }),
