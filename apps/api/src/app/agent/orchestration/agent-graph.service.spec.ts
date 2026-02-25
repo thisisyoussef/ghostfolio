@@ -4,6 +4,7 @@ jest.mock('@ghostfolio/api/app/portfolio/portfolio.service', () => ({
 
 import { AgentError, ErrorType } from '../errors/agent-error';
 import { AgentGraphService } from './agent-graph.service';
+import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 
 describe('AgentGraphService', () => {
   const userId = 'user-1';
@@ -144,5 +145,52 @@ describe('AgentGraphService', () => {
       type: ErrorType.MODEL,
       userMessage: 'Model timed out after 12000ms.'
     });
+  });
+
+  it('should emit exactly one system message with summary embedded in graph context', async () => {
+    const sessionMemory = {
+      getConversationContext: jest.fn().mockResolvedValue({
+        recentMessages: [
+          { role: 'user', content: 'Hi', createdAt: Date.now() },
+          {
+            role: 'tool',
+            content: '{"complianceScore":68}',
+            createdAt: Date.now(),
+            toolName: 'compliance_check',
+            toolResultSummary: 'Compliance score 68'
+          },
+          { role: 'assistant', content: 'Done', createdAt: Date.now() }
+        ],
+        summary: 'User asked for risk and ESG earlier.',
+        turnCount: 2
+      })
+    };
+    const toolRegistry = {
+      getLangChainTools: jest.fn().mockReturnValue([])
+    };
+    const service = new AgentGraphService(
+      sessionMemory as any,
+      toolRegistry as any
+    );
+
+    const messages = await (service as any).buildInitialMessages(
+      userId,
+      sessionId,
+      'Follow-up'
+    );
+
+    const systemMessages = messages.filter(
+      (message: unknown) => message instanceof SystemMessage
+    );
+    expect(systemMessages).toHaveLength(1);
+    expect(String((systemMessages[0] as SystemMessage).content)).toContain(
+      'Conversation summary'
+    );
+    expect(String((systemMessages[0] as SystemMessage).content)).toContain(
+      'User asked for risk and ESG earlier.'
+    );
+    expect(messages.some((message) => message instanceof HumanMessage)).toBe(
+      true
+    );
   });
 });

@@ -99,22 +99,23 @@ export class AgentGraphService {
       sessionId
     );
 
-    const messages: BaseMessage[] = [
-      new SystemMessage({
-        content:
-          'You are a portfolio assistant for Ghostfolio. Use tools whenever data is required. ' +
-          'Prefer factual, concise responses grounded in tool outputs. ' +
-          'When a user asks for both risk and ESG in one message, call both relevant tools in the same turn before answering. ' +
-          'For ESG follow-up questions about biggest offender impact or score changes if holdings are removed, use compliance tool outputs to compute and explain the scenario. ' +
-          'If user intent is unclear, ask a brief clarification.'
-      })
+    const systemSections = [
+      'You are a portfolio assistant for Ghostfolio. Use tools whenever data is required. ' +
+        'Prefer factual, concise responses grounded in tool outputs. ' +
+        'When a user asks for both risk and ESG in one message, call both relevant tools in the same turn before answering. ' +
+        'For ESG follow-up questions about biggest offender impact or score changes if holdings are removed, use compliance tool outputs to compute and explain the scenario. ' +
+        'If user intent is unclear, ask a brief clarification.'
     ];
 
     if (context.summary) {
-      messages.push(
-        new SystemMessage({ content: `Conversation summary:\n${context.summary}` })
-      );
+      systemSections.push(`Conversation summary:\n${context.summary}`);
     }
+
+    const messages: BaseMessage[] = [
+      new SystemMessage({
+        content: systemSections.join('\n\n')
+      })
+    ];
 
     for (const historyMessage of context.recentMessages) {
       messages.push(this.toModelMessage(historyMessage));
@@ -464,14 +465,16 @@ export class AgentGraphService {
         return new AIMessage({ content: message.content });
 
       case 'system':
-        return new SystemMessage({ content: message.content });
+        return new HumanMessage({
+          content: `[Session context] ${message.content}`
+        });
 
       case 'tool': {
         const toolLabel = message.toolName || 'tool';
         const summary = message.toolResultSummary || message.content;
 
-        return new SystemMessage({
-          content: `[Tool:${toolLabel}] ${summary}`
+        return new HumanMessage({
+          content: `[Tool output: ${toolLabel}] ${summary}`
         });
       }
 
