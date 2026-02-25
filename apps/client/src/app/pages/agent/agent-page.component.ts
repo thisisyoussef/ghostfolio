@@ -35,10 +35,33 @@ interface ToolCall {
   result: string;
 }
 
+interface VerificationCheck {
+  passed: boolean;
+  reason?: string;
+  details?: Record<string, unknown>;
+}
+
+interface VerificationSource {
+  tool: string;
+  claim: string;
+  source: string;
+  timestamp: string;
+}
+
+interface VerificationSummary {
+  status: 'pass' | 'warning' | 'fail';
+  confidenceScore: number;
+  confidenceLevel: 'high' | 'medium' | 'low';
+  checks: Record<string, VerificationCheck>;
+  sources: VerificationSource[];
+  generatedAt: string;
+}
+
 interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   toolCalls?: ToolCall[];
+  verification?: VerificationSummary;
   isError?: boolean;
   errorType?: string;
 }
@@ -47,6 +70,7 @@ interface ChatResponse {
   response: string;
   tool_calls: ToolCall[];
   session_id: string;
+  verification?: VerificationSummary;
   is_error?: boolean;
   error_type?: string;
 }
@@ -121,6 +145,7 @@ export class GfAgentPageComponent implements AfterViewChecked {
             role: 'assistant',
             content: response.response,
             toolCalls: response.tool_calls,
+            verification: response.verification,
             isError: response.is_error,
             errorType: response.error_type
           });

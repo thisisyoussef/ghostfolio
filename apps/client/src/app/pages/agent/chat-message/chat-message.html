@@ -1,36 +1,96 @@
-<div class="message-wrapper" [class.user]="role === 'user'" [class.assistant]="role === 'assistant'" [class.error]="isError">
-  <div class="avatar">
-    <ion-icon [name]="isError ? 'alert-circle-outline' : (role === 'user' ? 'person-outline' : 'sparkles-outline')" />
+<div class="message-stack" [class.user]="role === 'user'" [class.assistant]="role === 'assistant'" [class.error]="isError">
+  <div class="message-wrapper">
+    <div class="avatar">
+      <ion-icon [name]="isError ? 'alert-circle-outline' : (role === 'user' ? 'person-outline' : 'sparkles-outline')" />
+    </div>
+
+    <mat-card [appearance]="role === 'assistant' ? 'outlined' : undefined" class="message-card">
+      <mat-card-content>
+        <div class="message-role">{{ isError ? 'Error' : (role === 'user' ? 'You' : 'Agent') }}</div>
+
+        @if (role === 'assistant') {
+          <div class="message-content">
+            <markdown [data]="renderedContent"></markdown>
+          </div>
+        } @else {
+          <div class="message-content user-text">{{ content }}</div>
+        }
+      </mat-card-content>
+    </mat-card>
   </div>
 
-  <mat-card [appearance]="role === 'assistant' ? 'outlined' : undefined" class="message-card">
-    <mat-card-content>
-      <div class="message-role">{{ isError ? 'Error' : (role === 'user' ? 'You' : 'Agent') }}</div>
+  @if (role === 'assistant' && hasVerification) {
+    <div class="message-details metadata-panel">
+      <div class="metadata-grid">
+        <mat-card appearance="outlined" class="meta-card verification-card">
+          <mat-card-content>
+            <div class="meta-header">
+              <span class="meta-title">Verification</span>
+              <span class="verification-status" [ngClass]="statusClass">{{ statusLabel }}</span>
+            </div>
+            <div class="meta-line">
+              <span class="meta-label">Confidence</span>
+              <span class="meta-value">
+                {{ verification?.confidenceScore }}/100 ({{ verification?.confidenceLevel }})
+              </span>
+            </div>
+            <div class="meta-line">
+              <span class="meta-label">Failed checks</span>
+              <span class="meta-value">{{ failedChecksText }}</span>
+            </div>
+          </mat-card-content>
+        </mat-card>
 
-      @if (role === 'assistant') {
-        <div class="message-content">
-          <markdown [data]="content"></markdown>
-        </div>
-      } @else {
-        <div class="message-content user-text">{{ content }}</div>
-      }
-
-      @if (hasToolCalls) {
-        @for (tc of toolCalls; track $index) {
-          <gf-tool-result-card [toolCall]="tc" />
+        @if (hasSources) {
+          <mat-card appearance="outlined" class="meta-card sources-card">
+            <mat-card-content>
+              <div class="meta-title">Sources</div>
+              @for (source of verification?.sources; track $index) {
+                <div class="source-row">
+                  <div class="source-claim">{{ source.claim }}</div>
+                  <div class="source-meta">
+                    <span>{{ source.tool }}</span>
+                    <span>·</span>
+                    <span>{{ source.source }}</span>
+                    <span>·</span>
+                    <span>{{ formatTimestamp(source.timestamp) }}</span>
+                  </div>
+                </div>
+              }
+            </mat-card-content>
+          </mat-card>
         }
+      </div>
+    </div>
+  }
 
-        <button
-          mat-stroked-button
-          class="tool-calls-toggle"
-          (click)="toggleToolCalls()"
-        >
-          <ion-icon [name]="showToolCalls ? 'chevron-up-outline' : 'chevron-down-outline'" />
-          {{ showToolCalls ? 'Hide' : 'Show' }} raw data ({{ toolCalls?.length }})
-        </button>
+  @if (role === 'assistant' && hasToolCalls) {
+    <div class="message-details tool-calls-panel">
+      <div class="tool-name-chips">
+        @for (toolName of uniqueToolNames; track toolName) {
+          <span class="tool-name-chip">
+            <ion-icon name="construct-outline" />
+            {{ toolName }}
+          </span>
+        }
+      </div>
 
-        @if (showToolCalls) {
-          <div class="tool-calls">
+      <button
+        mat-stroked-button
+        class="tool-calls-toggle"
+        (click)="toggleToolCalls()"
+      >
+        <ion-icon [name]="showToolCalls ? 'chevron-up-outline' : 'chevron-down-outline'" />
+        {{ showToolCalls ? 'Hide' : 'Show' }} tool calls ({{ toolCalls?.length }})
+      </button>
+
+      @if (showToolCalls) {
+        <div class="tool-calls-expanded">
+          @for (tc of toolCalls; track $index) {
+            <gf-tool-result-card [toolCall]="tc" />
+          }
+
+          <div class="tool-calls-raw">
             @for (tc of toolCalls; track $index) {
               <div class="tool-call">
                 <div class="tool-name">
@@ -41,8 +101,8 @@
               </div>
             }
           </div>
-        }
+        </div>
       }
-    </mat-card-content>
-  </mat-card>
+    </div>
+  }
 </div>
