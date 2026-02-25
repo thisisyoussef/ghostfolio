@@ -54,6 +54,8 @@ golden-data.yaml (single source of truth — 20 cases)
 | `EVAL_BASE_URL` | No | `http://localhost:3333` | Base URL of the Ghostfolio API |
 | `LANGSMITH_API_KEY` | Yes (Tier 2 only) | — | LangSmith API key |
 
+> **LangSmith project**: Tier 2 automatically sets `LANGSMITH_PROJECT=ghostfolio-agent`, so all experiments appear under the `ghostfolio-agent` project in the [LangSmith dashboard](https://smith.langchain.com/).
+
 ## Evaluators (Deterministic Binary)
 
 Both tiers run the same 3 checks per case:

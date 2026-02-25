@@ -169,8 +169,12 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  // Set LangSmith project so all runs/experiments land under this project
+  process.env.LANGSMITH_PROJECT = LANGSMITH_PROJECT;
+
   console.log(`Target: ${baseUrl}`);
-  console.log(`LangSmith: ${langsmithKey.substring(0, 10)}...`);
+  console.log(`LangSmith project: ${LANGSMITH_PROJECT}`);
+  console.log(`LangSmith key: ${langsmithKey.substring(0, 10)}...`);
 
   // Authenticate
   clearAuthCache();

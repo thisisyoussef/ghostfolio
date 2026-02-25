@@ -289,3 +289,85 @@ cases:
     must_not_contain:
       - "500"
       - "Internal Server Error"
+
+  # ── Multi-turn Memory ───────────────────────────────────────────────────────
+
+  - id: "gs-021"
+    category: "memory"
+    subcategory: "follow_up"
+    difficulty: "straightforward"
+    turns:
+      - query: "What is the price of AAPL?"
+        expected_tools:
+          - "market_data_fetch"
+        must_contain:
+          - "AAPL"
+        must_not_contain:
+          - "I can help you with"
+      - query: "How about MSFT?"
+        expected_tools:
+          - "market_data_fetch"
+        must_contain:
+          - "MSFT"
+        must_not_contain:
+          - "I can help you with"
+    expected_tools:
+      - "market_data_fetch"
+    must_contain:
+      - "MSFT"
+    must_not_contain:
+      - "I can help you with"
+
+  - id: "gs-022"
+    category: "memory"
+    subcategory: "cross_tool"
+    difficulty: "moderate"
+    turns:
+      - query: "What is the price of AAPL?"
+        expected_tools:
+          - "market_data_fetch"
+        must_contain:
+          - "AAPL"
+        must_not_contain:
+          - "I can help you with"
+      - query: "Check my portfolio risk"
+        expected_tools:
+          - "portfolio_risk_analysis"
+        must_contain:
+          - "Portfolio"
+        must_not_contain:
+          - "AAPL"
+    expected_tools:
+      - "portfolio_risk_analysis"
+    must_contain:
+      - "Portfolio"
+    must_not_contain:
+      - "unable to"
+
+  # ── Error Handling ──────────────────────────────────────────────────────────
+
+  - id: "gs-023"
+    query: ""
+    category: "error"
+    subcategory: "empty_input"
+    difficulty: "edge_case"
+    expected_tools: []
+    must_contain:
+      - "provide a message"
+    must_not_contain:
+      - "Error"
+      - "500"
+      - "stack"
+
+  - id: "gs-024"
+    query: "Tell me a joke about finance"
+    category: "error"
+    subcategory: "out_of_scope"
+    difficulty: "edge_case"
+    expected_tools: []
+    must_contain:
+      - "I can help you with"
+    must_not_contain:
+      - "Error"
+      - "500"
+      - "undefined"

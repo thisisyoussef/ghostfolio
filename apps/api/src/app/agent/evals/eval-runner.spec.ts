@@ -17,7 +17,7 @@ describe('loadGoldenData', () => {
 
   it('should parse golden-data.yaml and return all 20 cases', () => {
     const data = loadGoldenData(yamlPath);
-    expect(data.cases).toHaveLength(20);
+    expect(data.cases).toHaveLength(24);
   });
 
   it('should parse single-turn cases with query field', () => {
