@@ -1,3 +1,14 @@
+import { buildVerificationSummary } from '../verification/confidence.policy';
+import {
+  attributionToSources,
+  hasValidSourceAttribution,
+  toSourceAttribution
+} from '../verification/source-attribution';
+import {
+  type VerificationSourceAttribution,
+  type VerificationSummary
+} from '../verification/verification.types';
+
 export interface HoldingInput {
   symbol: string;
   name?: string;
@@ -7,6 +18,7 @@ export interface HoldingInput {
 export interface ComplianceCheckInput {
   holdings: HoldingInput[];
   filterCategory?: string;
+  requestedSymbols?: string[];
 }
 
 export interface ViolationResult {
@@ -29,6 +41,11 @@ export interface ComplianceCheckOutput {
   totalChecked: number;
   datasetVersion: string;
   datasetLastUpdated: string;
+  requestedSymbols?: string[];
+  matchedSymbols?: string[];
+  unmatchedSymbols?: string[];
+  sourceAttribution?: VerificationSourceAttribution;
+  verification?: VerificationSummary;
 }
 
 interface EsgViolationEntry {
@@ -50,10 +67,21 @@ interface EsgDataset {
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const esgDataset: EsgDataset = require('../data/esg-violations.json');
 
+function isValidComplianceOutput(output: ComplianceCheckOutput): boolean {
+  return (
+    typeof output.complianceScore === 'number' &&
+    Array.isArray(output.violations) &&
+    Array.isArray(output.cleanHoldings) &&
+    typeof output.totalChecked === 'number' &&
+    typeof output.datasetVersion === 'string' &&
+    typeof output.datasetLastUpdated === 'string'
+  );
+}
+
 export async function complianceCheck(
   input: ComplianceCheckInput
 ): Promise<ComplianceCheckOutput> {
-  const { holdings, filterCategory } = input;
+  const { holdings, filterCategory, requestedSymbols = [] } = input;
   const dataset = esgDataset;
 
   // Build a lookup map: uppercase symbol → violation entry
@@ -119,12 +147,83 @@ export async function complianceCheck(
       : Math.round(((totalValue - violatedValue) / totalValue) * 100 * 100) /
         100;
 
-  return {
+  const baseResult: ComplianceCheckOutput = {
     complianceScore,
     violations,
     cleanHoldings,
     totalChecked: holdings.length,
     datasetVersion: dataset.version,
-    datasetLastUpdated: dataset.lastUpdated
+    datasetLastUpdated: dataset.lastUpdated,
+    ...(requestedSymbols.length > 0
+      ? {
+          matchedSymbols: Array.from(
+            new Set(
+              holdings.map((holding) => {
+                return String(holding.symbol || '').toUpperCase();
+              })
+            )
+          ),
+          requestedSymbols: Array.from(
+            new Set(
+              requestedSymbols.map((symbol) => {
+                return String(symbol || '').toUpperCase();
+              })
+            )
+          )
+        }
+      : {})
+  };
+
+  if (baseResult.requestedSymbols && baseResult.matchedSymbols) {
+    const matchedSet = new Set(baseResult.matchedSymbols);
+    baseResult.unmatchedSymbols = baseResult.requestedSymbols.filter((symbol) => {
+      return !matchedSet.has(symbol);
+    });
+  }
+
+  const sourceAttribution = toSourceAttribution({
+    primarySource: `ESG Violations Dataset v${dataset.version}`,
+    primaryTimestamp: dataset.lastUpdated
+  });
+
+  const checks = {
+    outputSchema: {
+      passed: isValidComplianceOutput(baseResult),
+      reason: isValidComplianceOutput(baseResult)
+        ? undefined
+        : 'Compliance output schema is invalid.'
+    },
+    sourceAttribution: {
+      passed: hasValidSourceAttribution(sourceAttribution),
+      reason: hasValidSourceAttribution(sourceAttribution)
+        ? undefined
+        : 'Source attribution must include source and timestamp.'
+    },
+    scoreBounds: {
+      passed: complianceScore >= 0 && complianceScore <= 100,
+      reason:
+        complianceScore >= 0 && complianceScore <= 100
+          ? undefined
+          : 'Compliance score must be between 0 and 100.'
+    }
+  };
+
+  const verification = buildVerificationSummary({
+    checks,
+    sources: attributionToSources({
+      attribution: sourceAttribution,
+      tool: 'compliance_check',
+      primaryClaim: 'esg compliance dataset'
+    }),
+    flags: {
+      outputSchemaFailed: !checks.outputSchema.passed,
+      sourceAttributionFailed: !checks.sourceAttribution.passed
+    }
+  });
+
+  return {
+    ...baseResult,
+    sourceAttribution,
+    verification
   };
 }

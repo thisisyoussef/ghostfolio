@@ -1,3 +1,14 @@
+import { buildVerificationSummary } from '../verification/confidence.policy';
+import {
+  attributionToSources,
+  hasValidSourceAttribution,
+  toSourceAttribution
+} from '../verification/source-attribution';
+import {
+  type VerificationSourceAttribution,
+  type VerificationSummary
+} from '../verification/verification.types';
+
 export interface PortfolioAnalysisInput {
   dateRange?: string;
   metrics?: string[];
@@ -27,7 +38,139 @@ export interface PortfolioAnalysisOutput {
     totalInvestment: number;
   };
   holdingsCount: number;
+  sourceAttribution?: VerificationSourceAttribution;
+  verification?: VerificationSummary;
   error?: string;
+}
+
+function isValidPortfolioOutput(output: PortfolioAnalysisOutput): boolean {
+  return (
+    typeof output.holdingsCount === 'number' &&
+    typeof output.concentration?.topHoldingSymbol === 'string' &&
+    typeof output.concentration?.topHoldingPercent === 'number' &&
+    typeof output.concentration?.herfindahlIndex === 'number' &&
+    Array.isArray(output.concentration?.topHoldings) &&
+    typeof output.concentration?.diversificationLevel === 'string' &&
+    !!output.allocation &&
+    typeof output.allocation.byAssetClass === 'object' &&
+    typeof output.performance?.currentValue === 'number' &&
+    typeof output.performance?.totalReturn === 'number' &&
+    typeof output.performance?.totalReturnPercent === 'number' &&
+    typeof output.performance?.totalInvestment === 'number'
+  );
+}
+
+function checkAllocationSanity(output: PortfolioAnalysisOutput): {
+  passed: boolean;
+  reason?: string;
+  details?: Record<string, unknown>;
+} {
+  const allocationValues = Object.values(output.allocation.byAssetClass || {});
+  const total = allocationValues.reduce((sum, value) => {
+    return sum + (Number.isFinite(value) ? value : 0);
+  }, 0);
+
+  if (output.holdingsCount === 0) {
+    return {
+      passed: true,
+      details: { totalAllocationPercent: total }
+    };
+  }
+
+  const passed = total >= 95 && total <= 105;
+
+  return {
+    passed,
+    reason: passed
+      ? undefined
+      : `Asset allocation total (${total.toFixed(2)}%) is outside 95-105%.`,
+    details: {
+      totalAllocationPercent: Math.round(total * 100) / 100
+    }
+  };
+}
+
+function checkReturnMathConsistency(output: PortfolioAnalysisOutput): {
+  passed: boolean;
+  reason?: string;
+  details?: Record<string, unknown>;
+} {
+  const investment = output.performance.totalInvestment;
+  const totalReturn = output.performance.totalReturn;
+  const observedPercent = output.performance.totalReturnPercent;
+
+  if (investment <= 0) {
+    return {
+      passed: true,
+      details: { observedPercent }
+    };
+  }
+
+  const expectedPercent = (totalReturn / investment) * 100;
+  const delta = Math.abs(expectedPercent - observedPercent);
+  const passed = delta <= 1;
+
+  return {
+    passed,
+    reason: passed
+      ? undefined
+      : `Return math mismatch (delta ${delta.toFixed(2)}pp).`,
+    details: {
+      delta,
+      expectedPercent: Math.round(expectedPercent * 100) / 100,
+      observedPercent
+    }
+  };
+}
+
+function attachVerification(
+  output: PortfolioAnalysisOutput
+): PortfolioAnalysisOutput {
+  const sourceAttribution = toSourceAttribution({
+    primarySource: 'Ghostfolio PortfolioService'
+  });
+
+  const outputSchemaPassed = isValidPortfolioOutput(output);
+  const sourceAttributionPassed = hasValidSourceAttribution(sourceAttribution);
+  const allocationSanity = checkAllocationSanity(output);
+  const returnMathConsistency = checkReturnMathConsistency(output);
+
+  const checks = {
+    outputSchema: {
+      passed: outputSchemaPassed,
+      reason: outputSchemaPassed
+        ? undefined
+        : 'Portfolio output schema is invalid.'
+    },
+    sourceAttribution: {
+      passed: sourceAttributionPassed,
+      reason: sourceAttributionPassed
+        ? undefined
+        : 'Source attribution must include source and timestamp.'
+    },
+    allocationSanity,
+    returnMathConsistency
+  };
+
+  const verification = buildVerificationSummary({
+    checks,
+    sources: attributionToSources({
+      attribution: sourceAttribution,
+      tool: 'portfolio_risk_analysis',
+      primaryClaim: 'portfolio analytics data'
+    }),
+    flags: {
+      outputSchemaFailed: !outputSchemaPassed,
+      sourceAttributionFailed: !sourceAttributionPassed,
+      hardError: !!output.error
+    }
+  });
+
+  return {
+    ...output,
+    sourceAttribution,
+    verification
+  };
 }
 
 /**
@@ -96,7 +239,10 @@ export async function portfolioRiskAnalysis(
   };
 
   if (!userId) {
-    return { ...emptyResult, error: 'No authenticated user — unable to access portfolio data.' };
+    return attachVerification({
+      ...emptyResult,
+      error: 'No authenticated user — unable to access portfolio data.'
+    });
   }
 
   // Fetch portfolio details and performance
@@ -121,12 +267,18 @@ export async function portfolioRiskAnalysis(
     holdings = details.holdings || {};
     performanceData = performance?.performance;
   } catch {
-    return { ...emptyResult, error: 'Unable to access portfolio data. Please try again later.' };
+    return attachVerification({
+      ...emptyResult,
+      error: 'Unable to access portfolio data. Please try again later.'
+    });
   }
 
   const holdingEntries = Object.entries(holdings);
   if (holdingEntries.length === 0) {
-    return { ...emptyResult, error: 'No holdings found in portfolio.' };
+    return attachVerification({
+      ...emptyResult,
+      error: 'No holdings found in portfolio.'
+    });
   }
 
   // --- Concentration ---
@@ -180,10 +332,10 @@ export async function portfolioRiskAnalysis(
     totalInvestment: performanceData?.totalInvestment ?? 0
   };
 
-  return {
+  return attachVerification({
     concentration,
     allocation: { byAssetClass: assetClassMap },
     performance,
     holdingsCount: holdingEntries.length
-  };
+  });
 }

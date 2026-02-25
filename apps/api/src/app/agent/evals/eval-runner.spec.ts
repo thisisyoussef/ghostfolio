@@ -15,9 +15,9 @@ import { EvalResult, GoldenCase } from './types';
 describe('loadGoldenData', () => {
   const yamlPath = path.resolve(__dirname, 'golden-data.yaml');
 
-  it('should parse golden-data.yaml and return all 20 cases', () => {
+  it('should parse golden-data.yaml and return all 27 cases', () => {
     const data = loadGoldenData(yamlPath);
-    expect(data.cases).toHaveLength(24);
+    expect(data.cases).toHaveLength(27);
   });
 
   it('should parse single-turn cases with query field', () => {

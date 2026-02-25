@@ -394,5 +394,33 @@ describe('portfolioRiskAnalysis', () => {
         })
       );
     });
+
+    it('should include verification metadata and source attribution in successful output', async () => {
+      const holdings = {
+        AAPL: {
+          allocationInPercentage: 1.0,
+          assetClass: 'EQUITY',
+          name: 'Apple',
+          symbol: 'AAPL',
+          valueInBaseCurrency: 10000,
+          netPerformancePercent: 0.1,
+          sectors: []
+        }
+      };
+
+      const mockPortfolioService = makeMockPortfolioService(holdings);
+      const result = await portfolioRiskAnalysis(
+        {},
+        mockPortfolioService as any,
+        TEST_USER_ID
+      );
+
+      expect(result.sourceAttribution?.primary.source).toContain('Ghostfolio');
+      expect(result.sourceAttribution?.primary.timestamp).toBeDefined();
+      expect(result.verification?.checks.outputSchema.passed).toBe(true);
+      expect(result.verification?.checks.sourceAttribution.passed).toBe(true);
+      expect(result.verification?.confidenceScore).toBeGreaterThanOrEqual(0);
+      expect(result.verification?.confidenceScore).toBeLessThanOrEqual(100);
+    });
   });
 });

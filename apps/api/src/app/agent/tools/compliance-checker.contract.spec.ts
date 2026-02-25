@@ -33,6 +33,8 @@ describe('complianceCheck — Contract Tests (Layer 4)', () => {
     expect(result).toHaveProperty('totalChecked');
     expect(result).toHaveProperty('datasetVersion');
     expect(result).toHaveProperty('datasetLastUpdated');
+    expect(result).toHaveProperty('sourceAttribution');
+    expect(result).toHaveProperty('verification');
 
     // Correct types
     expect(typeof result.complianceScore).toBe('number');
@@ -41,6 +43,10 @@ describe('complianceCheck — Contract Tests (Layer 4)', () => {
     expect(typeof result.totalChecked).toBe('number');
     expect(typeof result.datasetVersion).toBe('string');
     expect(typeof result.datasetLastUpdated).toBe('string');
+    expect(typeof result.sourceAttribution?.primary?.source).toBe('string');
+    expect(typeof result.sourceAttribution?.primary?.timestamp).toBe('string');
+    expect(typeof result.verification?.confidenceScore).toBe('number');
+    expect(typeof result.verification?.status).toBe('string');
 
     // No extra top-level fields
     const validKeys = new Set([
@@ -49,7 +55,9 @@ describe('complianceCheck — Contract Tests (Layer 4)', () => {
       'cleanHoldings',
       'totalChecked',
       'datasetVersion',
-      'datasetLastUpdated'
+      'datasetLastUpdated',
+      'sourceAttribution',
+      'verification'
     ]);
     for (const key of Object.keys(result)) {
       expect(validKeys.has(key)).toBe(true);

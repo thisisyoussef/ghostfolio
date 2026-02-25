@@ -187,4 +187,48 @@ describe('complianceCheck', () => {
     expect(violationCategories).toContain('weapons_defense');
     expect(violationCategories).toContain('tobacco');
   });
+
+  it('should include verification metadata and source attribution', async () => {
+    const holdings: HoldingInput[] = [
+      { symbol: 'AAPL', name: 'Apple Inc.', valueInBaseCurrency: 5000 },
+      {
+        symbol: 'XOM',
+        name: 'Exxon Mobil Corporation',
+        valueInBaseCurrency: 2000
+      }
+    ];
+
+    const result = await complianceCheck({ holdings });
+
+    expect(result.sourceAttribution?.primary.source).toContain('ESG Violations');
+    expect(result.sourceAttribution?.primary.timestamp).toBeDefined();
+    expect(result.verification?.checks.outputSchema.passed).toBe(true);
+    expect(result.verification?.checks.sourceAttribution.passed).toBe(true);
+  });
+
+  it('should include matched/unmatched metadata when requested symbols are provided', async () => {
+    const holdings: HoldingInput[] = [
+      { symbol: 'AAPL', name: 'Apple Inc.', valueInBaseCurrency: 5000 },
+      { symbol: 'XOM', name: 'Exxon Mobil Corporation', valueInBaseCurrency: 2000 }
+    ];
+
+    const result = await complianceCheck({
+      holdings,
+      requestedSymbols: ['AAPL', 'DEF']
+    });
+
+    expect(result.requestedSymbols).toEqual(['AAPL', 'DEF']);
+    expect(result.matchedSymbols).toContain('AAPL');
+    expect(result.unmatchedSymbols).toContain('DEF');
+  });
+
+  it('should keep confidence score in deterministic bounds', async () => {
+    const result = await complianceCheck({ holdings: [] });
+
+    expect(result.verification?.confidenceScore).toBeGreaterThanOrEqual(0);
+    expect(result.verification?.confidenceScore).toBeLessThanOrEqual(100);
+    expect(['high', 'medium', 'low']).toContain(
+      String(result.verification?.confidenceLevel)
+    );
+  });
 });

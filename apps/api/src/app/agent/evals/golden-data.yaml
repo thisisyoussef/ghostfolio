@@ -371,3 +371,52 @@ cases:
       - "Error"
       - "500"
       - "undefined"
+
+  # ── Verification (US-009) ──────────────────────────────────────────────────
+
+  - id: "gs-025"
+    query: "What is the price of AAPL?"
+    category: "verification"
+    subcategory: "market_metadata_sections"
+    difficulty: "straightforward"
+    expected_tools:
+      - "market_data_fetch"
+    must_contain:
+      - "AAPL"
+      - "### Verification"
+      - "### Sources"
+      - "Confidence"
+    must_not_contain:
+      - "Internal Server Error"
+      - "stack"
+
+  - id: "gs-026"
+    query: "Run a full ESG compliance check on my portfolio"
+    category: "verification"
+    subcategory: "compliance_metadata_sections"
+    difficulty: "straightforward"
+    expected_tools:
+      - "compliance_check"
+    must_contain:
+      - "ESG Compliance Report"
+      - "### Verification"
+      - "### Sources"
+      - "Confidence"
+    must_not_contain:
+      - "Internal Server Error"
+      - "stack"
+
+  - id: "gs-027"
+    query: "Get me the price of XYZNOTREAL"
+    category: "verification"
+    subcategory: "market_warning_discrepancy_or_unavailable"
+    difficulty: "edge_case"
+    expected_tools:
+      - "market_data_fetch"
+    must_contain:
+      - "XYZNOTREAL"
+      - "### Verification"
+      - "WARNING"
+    must_not_contain:
+      - "Internal Server Error"
+      - "stack"

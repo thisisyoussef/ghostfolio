@@ -8,6 +8,7 @@ import { AgentError, ErrorType } from '../errors/agent-error';
 import { complianceCheck } from '../tools/compliance-checker.tool';
 import { marketDataFetch } from '../tools/market-data.tool';
 import { portfolioRiskAnalysis } from '../tools/portfolio-analysis.tool';
+import { scenarioAnalysis } from '../tools/scenario-analysis.tool';
 
 export interface ToolExecutionContext {
   userId: string;
@@ -18,6 +19,23 @@ interface ToolDefinition {
   name: string;
   schema: ZodTypeAny;
 }
+
+const SYMBOL_BLOCKLIST = new Set([
+  'ADD',
+  'ALL',
+  'AND',
+  'BOTH',
+  'ESG',
+  'GET',
+  'HELP',
+  'NOW',
+  'OK',
+  'PLEASE',
+  'SHOW',
+  'THEN',
+  'VAR',
+  'YES'
+]);
 
 const TOOL_DEFINITIONS: ToolDefinition[] = [
   {
@@ -41,7 +59,19 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
       'Runs an ESG compliance check on portfolio holdings. Optionally filters to one ESG category.',
     name: 'compliance_check',
     schema: z.object({
-      filterCategory: z.string().optional()
+      filterCategory: z.string().optional(),
+      symbols: z.array(z.string().min(1)).max(20).optional()
+    })
+  },
+  {
+    description:
+      'Runs scenario and stress-test estimates (expected shortfall, rate sensitivity, breakeven).',
+    name: 'scenario_analysis',
+    schema: z.object({
+      marketDropPercent: z.number().positive().max(80).optional(),
+      message: z.string().optional(),
+      rateDownBps: z.number().int().positive().max(1000).optional(),
+      rateUpBps: z.number().int().positive().max(1000).optional()
     })
   }
 ];
@@ -105,18 +135,12 @@ export class AgentToolRegistry {
 
     switch (name) {
       case 'market_data_fetch': {
-        const symbols = Array.from(
-          new Set(
-            (args.symbols as string[])
-              .map((symbol) => symbol.trim().toUpperCase())
-              .filter(Boolean)
-          )
-        );
+        const symbols = this.normalizeSymbols(args.symbols as string[]);
 
         if (symbols.length === 0) {
           throw new AgentError(
             ErrorType.TOOL,
-            'No valid symbols were provided for market data fetch.',
+            'No valid ticker symbols were found. Please include symbols like AAPL or MSFT.',
             true
           );
         }
@@ -161,7 +185,7 @@ export class AgentToolRegistry {
           );
         }
 
-        const holdingInputs = Object.entries(holdings).map(
+        const allHoldings = Object.entries(holdings).map(
           ([symbol, data]: [string, any]) => ({
             symbol,
             name: data.name || symbol,
@@ -169,10 +193,51 @@ export class AgentToolRegistry {
           })
         );
 
+        const requestedSymbols = this.normalizeSymbols(
+          (args.symbols as string[] | undefined) || []
+        );
+        const scopedHoldings =
+          requestedSymbols.length > 0
+            ? allHoldings.filter((holding) => {
+                const symbol = String(holding.symbol || '').toUpperCase();
+                const name = String(holding.name || '').toUpperCase();
+                return (
+                  requestedSymbols.includes(symbol) ||
+                  requestedSymbols.includes(name)
+                );
+              })
+            : allHoldings;
+
         return complianceCheck({
           filterCategory: args.filterCategory,
-          holdings: holdingInputs
+          holdings: scopedHoldings,
+          ...(requestedSymbols.length > 0 ? { requestedSymbols } : {})
         });
+      }
+
+      case 'scenario_analysis': {
+        const result = await scenarioAnalysis(
+          {
+            ...(typeof args.message === 'string' ? { message: args.message } : {}),
+            ...(typeof args.marketDropPercent === 'number'
+              ? { marketDropPercent: args.marketDropPercent }
+              : {}),
+            ...(typeof args.rateUpBps === 'number'
+              ? { rateUpBps: args.rateUpBps }
+              : {}),
+            ...(typeof args.rateDownBps === 'number'
+              ? { rateDownBps: args.rateDownBps }
+              : {})
+          },
+          this.portfolioService,
+          context.userId
+        );
+
+        if (result.error) {
+          throw new AgentError(ErrorType.SERVICE, result.error, true);
+        }
+
+        return result;
       }
 
       default:
@@ -182,5 +247,17 @@ export class AgentToolRegistry {
           false
         );
     }
+  }
+
+  private normalizeSymbols(symbols: string[]): string[] {
+    return Array.from(
+      new Set(
+        symbols
+          .map((symbol) => symbol.trim().toUpperCase())
+          .filter((symbol) => symbol.length >= 1 && symbol.length <= 12)
+          .filter((symbol) => /^[A-Z0-9][A-Z0-9.\-]*$/.test(symbol))
+          .filter((symbol) => !SYMBOL_BLOCKLIST.has(symbol))
+      )
+    );
   }
 }
