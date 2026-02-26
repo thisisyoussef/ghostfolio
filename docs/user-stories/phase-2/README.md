@@ -13,7 +13,7 @@ Close all remaining product, engineering, verification, and submission gaps requ
 | US-015 | Phase 2 bootstrap and gap map | `done` | P0 | US-014 (context only) |
 | US-016 | Fifth tool: portfolio rebalance preview | `in-review` | P0 | US-015 |
 | US-017 | Compliance and adversarial hardening | `done` | P0 | US-016 |
-| US-018 | Eval gate raise and production regression | `todo` | P0 | US-017 |
+| US-018 | Eval gate raise and production regression | `done` | P0 | US-017 |
 | US-019 | Integrated expanding chat FAB | `todo` | P0 | US-018 |
 | US-020 | Chat UI contract alignment (all tools) | `todo` | P0 | US-019 |
 | US-021 | Carryover closure for US-006/007/009/012/014 | `todo` | P0 | US-020 |

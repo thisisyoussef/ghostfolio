@@ -2,11 +2,11 @@
 
 ## Status
 
-- State: `todo`
+- State: `done`
 - Owner: `youssef`
 - Depends on: US-017
-- Related PR/Commit:
-- Target environment: `prod`
+- Related PR/Commit: `d8fdf97aa` (evidence), `cb37c40e3` (runtime changes validated)
+- Target environment: `production`
 
 ## Persona
 
@@ -42,10 +42,10 @@ Out of scope:
 
 ## Acceptance Criteria
 
-- [ ] AC1: Production eval run is executed and recorded with timestamp.
-- [ ] AC2: Dataset count/distribution checks remain compliant.
-- [ ] AC3: Internal pass rate is `>=85%` or documented blockers exist with owners.
-- [ ] AC4: Failure taxonomy and mitigation plan are recorded.
+- [x] AC1: Production eval run is executed and recorded with timestamp.
+- [x] AC2: Dataset count/distribution checks remain compliant.
+- [x] AC3: Internal pass rate is `>=85%` or documented blockers exist with owners.
+- [x] AC4: Failure taxonomy and mitigation plan are recorded.
 
 ## Local Validation
 
@@ -61,9 +61,20 @@ EVAL_ACCESS_TOKEN=<token> EVAL_BASE_URL=https://ghostfolio-production-e8d1.up.ra
 
 ## Checkpoint Result
 
-- Commit SHA:
-- Production URL(s):
-- Eval pass rate:
-- User Validation: `passed | failed | blocked`
-- Definition of Done: `all passed | exceptions noted below`
+- Commit SHA: `d8fdf97aa` (documentation/evidence), `cb37c40e3` (validated deployment artifact)
+- Production URL(s): `https://ghostfolio-production-e8d1.up.railway.app`
+- Eval pass rate: `94.55% (52/55)` on 2026-02-26 post-deploy rerun
+- User Validation: `passed`
+- Definition of Done: `all passed; exceptions noted below`
 - Notes:
+  - Production deployment used for regression validation: `e12d8fd8-8176-424d-9d12-ee3415077eb2` (`SUCCESS`, 2026-02-26 09:38:48 -05:00).
+  - Eval evidence artifact: `apps/api/src/app/agent/evals/output/prod-eval-us017-2026-02-26-postdeploy.txt`.
+  - Distribution/compliance checks from runner output:
+    - Total cases: `55` (>=50 required).
+    - Coverage buckets: `happy_path=23`, `edge_case=12`, `adversarial=10`, `multi_step=10` (all minimums satisfied).
+    - Required category buckets present: `market_data`, `portfolio`, `compliance`, `adversarial`, `multi_turn`.
+  - Internal gate target `>=85%` achieved (`94.55%`), while baseline `>=80%` remains intact.
+  - Failure taxonomy (3 residual failures, owner `youssef`, follow-up sequence US-019/US-020 carryover and next hardening pass):
+    - `gs-024` (`error/out_of_scope`): content mismatch vs. expected assistive fallback phrasing.
+    - `gs-043` (`adversarial/force_wrong_market_value`): tool-selection miss (rebalance intent false positive).
+    - `gs-048` (`adversarial/verification_strip_attempt`): tool-selection miss (rebalance intent false positive).
