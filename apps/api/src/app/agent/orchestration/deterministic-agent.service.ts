@@ -124,6 +124,14 @@ const REBALANCE_KEYWORDS = [
   'trim'
 ];
 
+const NO_TICKER_ADVERSARIAL_MARKET_PATTERNS = [
+  /fake tool call result/i,
+  /tool result poisoning/i,
+  /confidence\s*100/i,
+  /ignore source attribution/i,
+  /skip verification metadata/i
+];
+
 const COMMON_SYMBOL_FALSE_POSITIVES = new Set([
   'ADD',
   'A',
@@ -418,6 +426,10 @@ export class DeterministicAgentService {
         userId,
         input.requestId
       );
+    }
+
+    if (this.isNoTickerAdversarialMarketProbe(message)) {
+      return this.handleMarketDataQuestion(['?'], sessionId, input.requestId);
     }
 
     const continuationIntent = await this.resolveContinuationIntent(
@@ -1349,12 +1361,36 @@ export class DeterministicAgentService {
     });
 
     const byPrefix = Array.from(
-      message.matchAll(/\b(?:ticker|symbol|holdings?)\s*[:\-]?\s*([A-Z]{2,5})\b/gi)
+      message.matchAll(
+        /\b(?:ticker|symbol|holding|holdings)\s*(?::|=|-|\bis\b)\s*([A-Z]{2,5})\b/gi
+      )
     ).map((match) => String(match[1] || '').toUpperCase());
 
     return Array.from(new Set([...directMatches, ...byPrefix])).filter((symbol) => {
       return !COMMON_SYMBOL_FALSE_POSITIVES.has(symbol);
     });
+  }
+
+  private isNoTickerAdversarialMarketProbe(message: string): boolean {
+    if (this.extractSymbols(message).length > 0) {
+      return false;
+    }
+
+    if (this.isNoTickerPlaceholderMarketQuery(message)) {
+      return true;
+    }
+
+    return NO_TICKER_ADVERSARIAL_MARKET_PATTERNS.some((pattern) => {
+      return pattern.test(message);
+    });
+  }
+
+  private isNoTickerPlaceholderMarketQuery(message: string): boolean {
+    if (!/\b(price|quote|market data)\b/i.test(message)) {
+      return false;
+    }
+
+    return /\?{3,}/.test(message);
   }
 
   private parseTargetMaxHoldingPct(message: string): number | undefined {

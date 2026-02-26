@@ -34,6 +34,42 @@ import { type VerificationSummary } from './verification/verification.types';
 
 ensureLangSmithEnv();
 
+const SENSITIVE_RESPONSE_PATTERNS = [
+  /\b(?:OPENAI_API_KEY|LANGSMITH_API_KEY|ANTHROPIC_API_KEY|API_KEY_ALPHA_VANTAGE|GHOSTFOLIO_API_KEY|JWT_SECRET_KEY)\b\s*[:=]\s*[^\s,;`'"]+/gi,
+  /\b[A-Z0-9_]*API_KEY[A-Z0-9_]*\b/gi,
+  /BEGIN_SYSTEM_PROMPT[\s\S]*?(?:END_SYSTEM_PROMPT|$)/gi,
+  /\bsk-[A-Za-z0-9]{16,}\b/g
+];
+
+const NO_TICKER_ADVERSARIAL_MARKET_PATTERNS = [
+  /fake tool call result/i,
+  /tool result poisoning/i,
+  /confidence\s*100/i,
+  /ignore source attribution/i,
+  /skip verification metadata/i
+];
+
+const ADVERSARIAL_SAFETY_PATTERNS = [
+  /output private env vars?/i,
+  /environment variables?/i,
+  /secret(?:s)?/i,
+  /api key/i,
+  /system prompt/i,
+  /hidden prompt/i,
+  /chain[-\s]?of[-\s]?thought/i,
+  /prompt injection/i,
+  /jailbreak/i,
+  /fake tool call result/i,
+  /ignore source attribution/i,
+  /confidence\s*100/i,
+  /skip verification metadata/i,
+  /bypass compliance/i
+];
+
+const MARKET_SAFETY_PROBE_PATTERN = /\b(price|quote)\b/i;
+const PLACEHOLDER_PATTERN = /\?{3,}/;
+const TICKER_CANDIDATE_PATTERN = /\b[A-Z]{2,12}\b/g;
+
 @Injectable()
 export class AgentService {
   private readonly deterministicAgent: DeterministicAgentService;
@@ -104,7 +140,20 @@ export class AgentService {
 
     if (!this.isGraphEnabled()) {
       const deterministicResponse = await this.deterministicAgent.chat(input);
-      const response = this.finalizeVerifiedResponse(deterministicResponse);
+      const response = this.finalizeAndSanitize(deterministicResponse);
+      await this.persistTurn(input, response);
+      return response;
+    }
+
+    if (this.shouldForceDeterministic(message)) {
+      console.warn('[agent] forcing deterministic route for safety-sensitive prompt', {
+        requestId: input.requestId,
+        sessionId,
+        userHash: this.hashUserId(input.userId)
+      });
+
+      const deterministicResponse = await this.deterministicAgent.chat(input);
+      const response = this.finalizeAndSanitize(deterministicResponse);
       await this.persistTurn(input, response);
       return response;
     }
@@ -123,14 +172,14 @@ export class AgentService {
         );
 
         const deterministicSecondPass = await this.deterministicAgent.chat(input);
-        const retryResponse = this.finalizeVerifiedResponse(
+        const retryResponse = this.finalizeAndSanitize(
           deterministicSecondPass
         );
         await this.persistTurn(input, retryResponse);
         return retryResponse;
       }
 
-      const response = this.finalizeVerifiedResponse(graphResponse);
+      const response = this.finalizeAndSanitize(graphResponse);
       await this.persistTurn(input, response);
       return response;
     } catch (error) {
@@ -156,7 +205,7 @@ export class AgentService {
           }
         );
         const fallbackResponse = await this.deterministicAgent.chat(input);
-        const response = this.finalizeVerifiedResponse(
+        const response = this.finalizeAndSanitize(
           this.withFallbackNotice(fallbackResponse)
         );
         await this.persistTurn(input, response);
@@ -179,10 +228,11 @@ export class AgentService {
           sessionId,
           toolCalls: []
         };
+        const sanitizedResponse = this.sanitizeSensitiveResponse(response);
 
-        await this.persistTurn(input, response);
+        await this.persistTurn(input, sanitizedResponse);
 
-        return response;
+        return sanitizedResponse;
       }
     }
   }
@@ -317,6 +367,20 @@ export class AgentService {
     }
 
     if (
+      this.requiresComplianceToolEvidence(message) &&
+      !this.responseIncludesTool(response, 'compliance_check')
+    ) {
+      return true;
+    }
+
+    if (
+      this.isNoTickerAdversarialMarketProbe(message) &&
+      !this.responseIncludesTool(response, 'market_data_fetch')
+    ) {
+      return true;
+    }
+
+    if (
       this.requestsUnsupportedPortfolioMetric(message) &&
       !this.hasCapabilityAcknowledgement(lower)
     ) {
@@ -340,6 +404,57 @@ export class AgentService {
     return /\b(yes|yeah|yep|ok|okay|both|all of the above|go ahead|do that)\b/.test(
       lower
     );
+  }
+
+  private shouldForceDeterministic(message: string): boolean {
+    return (
+      this.requiresComplianceToolEvidence(message) ||
+      this.isAdversarialSensitiveMessage(message) ||
+      this.isNoTickerMarketSafetyProbe(message)
+    );
+  }
+
+  private requiresComplianceToolEvidence(message: string): boolean {
+    return isEsgQuestion(message);
+  }
+
+  private responseIncludesTool(response: ChatResponse, toolName: string): boolean {
+    return response.toolCalls.some((toolCall) => toolCall.name === toolName);
+  }
+
+  private isAdversarialSensitiveMessage(message: string): boolean {
+    return ADVERSARIAL_SAFETY_PATTERNS.some((pattern) => pattern.test(message));
+  }
+
+  private isNoTickerMarketSafetyProbe(message: string): boolean {
+    if (!MARKET_SAFETY_PROBE_PATTERN.test(message)) {
+      return false;
+    }
+
+    if (!PLACEHOLDER_PATTERN.test(message)) {
+      return false;
+    }
+
+    return this.extractTickerCandidates(message).length === 0;
+  }
+
+  private isNoTickerAdversarialMarketProbe(message: string): boolean {
+    if (this.extractTickerCandidates(message).length > 0) {
+      return false;
+    }
+
+    if (this.isNoTickerMarketSafetyProbe(message)) {
+      return true;
+    }
+
+    return NO_TICKER_ADVERSARIAL_MARKET_PATTERNS.some((pattern) => {
+      return pattern.test(message);
+    });
+  }
+
+  private extractTickerCandidates(message: string): string[] {
+    const matches = message.match(TICKER_CANDIDATE_PATTERN) || [];
+    return Array.from(new Set(matches.map((match) => match.toUpperCase())));
   }
 
   private requiresExplicitRiskLevel(message: string): boolean {
@@ -384,6 +499,11 @@ export class AgentService {
       ...response,
       response: `${response.response}\n\n${notice}`
     };
+  }
+
+  private finalizeAndSanitize(response: ChatResponse): ChatResponse {
+    const finalized = this.finalizeVerifiedResponse(response);
+    return this.sanitizeSensitiveResponse(finalized);
   }
 
   private shouldAttachFallbackNotice(response: ChatResponse): boolean {
@@ -468,6 +588,40 @@ export class AgentService {
       response: responseWithSections,
       verification
     };
+  }
+
+  private sanitizeSensitiveResponse(response: ChatResponse): ChatResponse {
+    const sanitized = this.sanitizeSensitiveText(response.response);
+
+    if (sanitized === response.response) {
+      return response;
+    }
+
+    return {
+      ...response,
+      response: sanitized
+    };
+  }
+
+  private sanitizeSensitiveText(text: string): string {
+    let sanitized = text;
+    let redacted = false;
+
+    for (const pattern of SENSITIVE_RESPONSE_PATTERNS) {
+      sanitized = sanitized.replace(pattern, () => {
+        redacted = true;
+        return '[redacted secret]';
+      });
+    }
+
+    if (
+      redacted &&
+      !/cannot expose secrets or internal prompts/i.test(sanitized)
+    ) {
+      sanitized = `${sanitized}\n\nI cannot expose secrets or internal prompts.`;
+    }
+
+    return sanitized;
   }
 
   private buildVerificationFailureResponse(

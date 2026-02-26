@@ -2,7 +2,7 @@
 
 ## Status
 
-- State: `todo`
+- State: `in-review`
 - Owner: `youssef`
 - Depends on: US-016
 - Related PR/Commit:
@@ -51,6 +51,8 @@ Out of scope:
 
 ```bash
 npx dotenv-cli -e .env.example -- npx jest --config apps/api/jest.config.ts --runInBand "apps/api/src/app/agent/"
+npx dotenv-cli -e .env.example -- npx jest --config apps/api/jest.config.ts --runInBand "apps/api/src/app/agent/evals/"
+npm run ci:release-gate
 ```
 
 ## How To Verify In Prod
@@ -62,6 +64,16 @@ npx dotenv-cli -e .env.example -- npx jest --config apps/api/jest.config.ts --ru
 
 - Commit SHA:
 - Production URL(s):
-- User Validation: `passed | failed | blocked`
-- Definition of Done: `all passed | exceptions noted below`
+- User Validation: `passed (local)`
+- Definition of Done: `exceptions noted below`
 - Notes:
+  - Implemented deterministic safety-first gate in graph-enabled runtime for compliance and adversarial-sensitive prompts.
+  - Added no-ticker adversarial routing in deterministic orchestrator to `market_data_fetch` with `symbols: ['?']`.
+  - Added response sanitization to redact secret-like leakage markers before persistence/return.
+  - Local test passes:
+    - `apps/api/src/app/agent/orchestration/deterministic-agent.service.spec.ts`
+    - `apps/api/src/app/agent/agent.behavioral.spec.ts`
+    - Full `apps/api/src/app/agent/` Jest suite
+    - Full `apps/api/src/app/agent/evals/` Jest suite
+  - `npm run ci:release-gate` currently fails in this environment because Node is `18.20.4`; gate requires `>=22.18.0`.
+  - Production eval rerun and final pass/fail taxonomy still pending.
