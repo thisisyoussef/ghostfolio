@@ -142,6 +142,23 @@ describe('AgentController (integration)', () => {
     expect(toolResult).toHaveProperty('performance');
   });
 
+  it('should route rebalance request to portfolio_rebalance_preview tool', async () => {
+    const result = await controller.chat({
+      message:
+        'Create a rebalance preview with max holding 20% and exclude XOM.',
+      session_id: 'test-rebalance'
+    });
+
+    expect(result.tool_calls).toHaveLength(1);
+    expect(result.tool_calls[0].name).toBe('portfolio_rebalance_preview');
+    expect(result.session_id).toBe('test-rebalance');
+    const toolResult = JSON.parse(result.tool_calls[0].result);
+    expect(toolResult).toHaveProperty('currentTopHoldings');
+    expect(toolResult).toHaveProperty('suggestedTrades');
+    expect(toolResult).toHaveProperty('projectedConcentration');
+    expect(toolResult).toHaveProperty('assumptions');
+  });
+
   it('should route ESG compliance question to compliance_check tool', async () => {
     const result = await controller.chat({
       message: 'Is my portfolio ESG compliant?',

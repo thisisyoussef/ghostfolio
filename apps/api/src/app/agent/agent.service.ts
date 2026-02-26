@@ -18,6 +18,7 @@ import {
   DeterministicAgentService,
   isEsgQuestion,
   isPortfolioQuestion,
+  isRebalanceQuestion,
   isScenarioQuestion
 } from './orchestration/deterministic-agent.service';
 import { AgentToolRegistry } from './orchestration/tool-registry';
@@ -329,6 +330,7 @@ export class AgentService {
     if (
       isEsgQuestion(message) ||
       isPortfolioQuestion(message) ||
+      isRebalanceQuestion(message) ||
       isScenarioQuestion(message)
     ) {
       return true;

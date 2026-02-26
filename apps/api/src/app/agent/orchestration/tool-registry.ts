@@ -8,6 +8,7 @@ import { AgentError, ErrorType } from '../errors/agent-error';
 import { complianceCheck } from '../tools/compliance-checker.tool';
 import { marketDataFetch } from '../tools/market-data.tool';
 import { portfolioRiskAnalysis } from '../tools/portfolio-analysis.tool';
+import { portfolioRebalancePreview } from '../tools/portfolio-rebalance-preview.tool';
 import { scenarioAnalysis } from '../tools/scenario-analysis.tool';
 
 export interface ToolExecutionContext {
@@ -150,6 +151,15 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
       message: z.string().optional(),
       rateDownBps: z.number().int().positive().max(1000).optional(),
       rateUpBps: z.number().int().positive().max(1000).optional()
+    })
+  },
+  {
+    description:
+      'Previews read-only concentration rebalance trades with optional cap target and symbol exclusions.',
+    name: 'portfolio_rebalance_preview',
+    schema: z.object({
+      excludeSymbols: z.array(z.string().min(1)).max(25).optional(),
+      targetMaxHoldingPct: z.number().min(5).max(35).default(20)
     })
   }
 ];
@@ -305,6 +315,31 @@ export class AgentToolRegistry {
               : {}),
             ...(typeof args.rateDownBps === 'number'
               ? { rateDownBps: args.rateDownBps }
+              : {})
+          },
+          this.portfolioService,
+          context.userId
+        );
+
+        if (result.error) {
+          throw new AgentError(ErrorType.SERVICE, result.error, true);
+        }
+
+        return result;
+      }
+
+      case 'portfolio_rebalance_preview': {
+        const normalizedExclusions = this.normalizeSymbols(
+          (args.excludeSymbols as string[] | undefined) || []
+        );
+
+        const result = await portfolioRebalancePreview(
+          {
+            ...(typeof args.targetMaxHoldingPct === 'number'
+              ? { targetMaxHoldingPct: args.targetMaxHoldingPct }
+              : {}),
+            ...(normalizedExclusions.length > 0
+              ? { excludeSymbols: normalizedExclusions }
               : {})
           },
           this.portfolioService,

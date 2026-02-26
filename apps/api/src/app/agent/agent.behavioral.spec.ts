@@ -83,6 +83,20 @@ describe('AgentService — Behavioral Tests (Layer 3)', () => {
     expect(mockedMarketDataFetch).not.toHaveBeenCalled();
   });
 
+  it('should route explicit rebalance prompts to portfolio_rebalance_preview', async () => {
+    const result = await service.chat({
+      message:
+        'Rebalance my portfolio with a max holding cap of 20% and exclude XOM.',
+      sessionId: TEST_SESSION,
+      userId: TEST_USER_ID
+    });
+
+    expect(result.toolCalls).toHaveLength(1);
+    expect(result.toolCalls[0].name).toBe('portfolio_rebalance_preview');
+    expect(result.response).toContain('Portfolio Rebalance Preview');
+    expect(mockedMarketDataFetch).not.toHaveBeenCalled();
+  });
+
   it('should route ESG question to compliance_check, not other tools', async () => {
     const result = await service.chat({
       message: 'Is my portfolio ESG compliant?',

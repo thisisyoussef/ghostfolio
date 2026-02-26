@@ -167,6 +167,7 @@ export class AgentGraphService {
         'When a user asks for both risk and ESG in one message, call both relevant tools in the same turn before answering. ' +
         'For ESG follow-up questions about biggest offender impact or score changes if holdings are removed, use compliance tool outputs to compute and explain the scenario. ' +
         'When ESG requests name specific holdings, pass those tickers via compliance_check.symbols so the response is scoped. ' +
+        'For concentration trim requests, max-holding caps, exclusions, or suggested rebalance trades, use portfolio_rebalance_preview. ' +
         'For stress tests, expected shortfall, basis-point sensitivity, and breakeven questions, use scenario_analysis. ' +
         'Never call market_data_fetch unless you have explicit ticker symbols. Never treat words like "add", "both", or "yes" as symbols. ' +
         'If user intent is unclear, ask a brief clarification.'

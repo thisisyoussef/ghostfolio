@@ -13,6 +13,7 @@ import {
 } from '../tools/compliance-checker.tool';
 import { marketDataFetch } from '../tools/market-data.tool';
 import { portfolioRiskAnalysis } from '../tools/portfolio-analysis.tool';
+import { portfolioRebalancePreview } from '../tools/portfolio-rebalance-preview.tool';
 import { scenarioAnalysis } from '../tools/scenario-analysis.tool';
 
 const ESG_KEYWORDS = [
@@ -109,6 +110,18 @@ const SCENARIO_KEYWORDS = [
   'yield curve',
   'var',
   'what if'
+];
+
+const REBALANCE_KEYWORDS = [
+  'exclude',
+  'excluding',
+  'holding cap',
+  'max holding',
+  'rebalance',
+  'rebalancing',
+  'reduce concentration',
+  'suggested trades',
+  'trim'
 ];
 
 const COMMON_SYMBOL_FALSE_POSITIVES = new Set([
@@ -210,6 +223,31 @@ export function isScenarioQuestion(message: string): boolean {
   }
 
   return /\bvar\b|\bvalue at risk\b/i.test(message);
+}
+
+export function isRebalanceQuestion(message: string): boolean {
+  const lower = message.toLowerCase();
+  const asksRiskOverview =
+    /(overall risk|risk level|how risky|volatility|sharpe|allocation breakdown|performance summary)/.test(
+      lower
+    );
+  const hasKeyword = REBALANCE_KEYWORDS.some((keyword) => lower.includes(keyword));
+  const asksRebalancePlan =
+    /(rebalance (my )?portfolio|rebalance preview|rebalance plan|trade preview|how (should|can) i rebalance)/.test(
+      lower
+    );
+  const hasExplicitTarget =
+    /(?:max(?:imum)?|cap|target)[^\d]{0,16}(\d{1,2}(?:\.\d+)?)\s*%/i.test(
+      message
+    ) ||
+    /(\d{1,2}(?:\.\d+)?)\s*%\s*(?:max|cap|target)/i.test(message);
+  const hasExcludeInstruction =
+    /(exclude|excluding|without|except|skip)\b/.test(lower);
+
+  return (
+    !asksRiskOverview &&
+    (hasExplicitTarget || hasExcludeInstruction || asksRebalancePlan || hasKeyword)
+  );
 }
 
 function roundTwo(value: number): number {
@@ -325,6 +363,7 @@ export class DeterministicAgentService {
 
     const isEsg = isEsgQuestion(message);
     const isPortfolio = isPortfolioQuestion(message);
+    const isRebalance = isRebalanceQuestion(message);
     const isScenario = isScenarioQuestion(message);
 
     if (isEsg && isScenario) {
@@ -356,6 +395,15 @@ export class DeterministicAgentService {
 
     if (isScenario) {
       return this.handleScenarioQuestion(
+        message,
+        sessionId,
+        userId,
+        input.requestId
+      );
+    }
+
+    if (isRebalance) {
+      return this.handleRebalanceQuestion(
         message,
         sessionId,
         userId,
@@ -425,6 +473,7 @@ export class DeterministicAgentService {
           'I can help you with:\n' +
           '- ESG compliance check (ask about ESG, ethical investing, fossil fuels, etc.)\n' +
           '- Portfolio risk analysis (ask about concentration, allocation, or performance)\n' +
+          '- Rebalance preview (ask for target max holding %, exclusions, and suggested trades)\n' +
           '- Scenario analysis (ask about stress tests, shortfall, or rate sensitivity)\n' +
           '- Stock market data (include ticker symbols like AAPL, MSFT)\n\n' +
           'What would you like to know?',
@@ -891,6 +940,160 @@ export class DeterministicAgentService {
     };
   }
 
+  private async handleRebalanceQuestion(
+    message: string,
+    sessionId: string,
+    userId: string,
+    requestId?: string
+  ): Promise<ChatResponse> {
+    const traceableRebalance = traceable(
+      async (params: {
+        message: string;
+        sessionId: string;
+        userId: string;
+      }): Promise<ChatResponse> => {
+        return this.rebalanceImpl(params.message, params.sessionId, params.userId);
+      },
+      {
+        metadata: {
+          orchestrator: 'deterministic',
+          request_id: requestId || 'unknown'
+        },
+        name: 'portfolio_rebalance_preview',
+        run_type: 'tool'
+      }
+    );
+
+    return traceableRebalance({ message, sessionId, userId });
+  }
+
+  private async rebalanceImpl(
+    message: string,
+    sessionId: string,
+    userId: string
+  ): Promise<ChatResponse> {
+    try {
+      const parsedTarget = this.parseTargetMaxHoldingPct(message);
+      const targetMaxHoldingPct =
+        typeof parsedTarget === 'number' ? parsedTarget : 20;
+      const excludeSymbols = this.parseRebalanceExcludedSymbols(message);
+
+      const result = await portfolioRebalancePreview(
+        {
+          ...(typeof targetMaxHoldingPct === 'number'
+            ? { targetMaxHoldingPct }
+            : {}),
+          ...(excludeSymbols.length > 0 ? { excludeSymbols } : {})
+        },
+        this.portfolioService,
+        userId
+      );
+
+      const toolCalls: ToolCallInfo[] = [
+        {
+          args: {
+            ...(excludeSymbols.length > 0 ? { excludeSymbols } : {}),
+            targetMaxHoldingPct
+          },
+          name: 'portfolio_rebalance_preview',
+          result: JSON.stringify(result)
+        }
+      ];
+
+      if (result.error) {
+        return {
+          errorType: ErrorType.SERVICE,
+          isError: true,
+          response: result.error,
+          sessionId,
+          toolCalls
+        };
+      }
+
+      const parts: string[] = [
+        '### 🧭 Portfolio Rebalance Preview (Read-Only)',
+        '',
+        `- **Target max holding:** ${result.assumptions.targetMaxHoldingPct}%`,
+        `- **Excluded symbols:** ${result.assumptions.excludedSymbols.length > 0 ? result.assumptions.excludedSymbols.join(', ') : 'none'}`,
+        `- **Portfolio value:** $${result.assumptions.portfolioValue.toLocaleString(undefined, {
+          maximumFractionDigits: 2,
+          minimumFractionDigits: 2
+        })}`,
+        '',
+        '### 📉 Concentration Projection',
+        '',
+        `- **Current top holding:** ${result.projectedConcentration.currentTopHoldingPct}%`,
+        `- **Projected top holding:** ${result.projectedConcentration.projectedTopHoldingPct}%`,
+        `- **Current HHI:** ${result.projectedConcentration.currentHerfindahlIndex}`,
+        `- **Projected HHI:** ${result.projectedConcentration.projectedHerfindahlIndex}`,
+        `- **Estimated concentration reduction:** ${result.projectedConcentration.concentrationReductionPct}%`
+      ];
+
+      if (result.currentTopHoldings.length > 0) {
+        parts.push('', '### 🗂️ Current Top Holdings', '');
+
+        for (const holding of result.currentTopHoldings) {
+          parts.push(
+            `- ${holding.symbol} — ${holding.name}: ${holding.currentPercent}% ($${holding.currentValue.toLocaleString(undefined, {
+              maximumFractionDigits: 2,
+              minimumFractionDigits: 2
+            })})`
+          );
+        }
+      }
+
+      parts.push('', '### 🔁 Suggested Trades (Preview Only)', '');
+
+      if (result.suggestedTrades.length === 0) {
+        parts.push(
+          '- No trim trades are needed under the selected target and exclusions.'
+        );
+      } else {
+        for (const trade of result.suggestedTrades) {
+          parts.push(
+            `- **${trade.action} ${trade.symbol}**: ${trade.tradePercent}% (~$${trade.estimatedValue.toLocaleString(undefined, {
+              maximumFractionDigits: 2,
+              minimumFractionDigits: 2
+            })}) from ${trade.fromPercent}% to ${trade.toPercent}%`
+          );
+        }
+      }
+
+      parts.push('', '### ⚙️ Assumptions', '');
+      parts.push('- Read-only preview only; no orders were placed.');
+      parts.push(
+        `- Methodology: ${result.assumptions.methodology}`
+      );
+      parts.push(
+        `- Synthetic diversification sleeves: ${result.assumptions.syntheticSleeveCount}`
+      );
+
+      return {
+        response: parts.join('\n'),
+        sessionId,
+        toolCalls
+      };
+    } catch (err) {
+      const classified =
+        err instanceof AgentError
+          ? err
+          : new AgentError(
+              ErrorType.SERVICE,
+              'Unable to run rebalance preview. Please try again later.',
+              true,
+              err instanceof Error ? err : undefined
+            );
+
+      return {
+        errorType: classified.type,
+        isError: true,
+        response: classified.userMessage,
+        sessionId,
+        toolCalls: []
+      };
+    }
+  }
+
   private async handlePortfolioQuestion(
     message: string,
     sessionId: string,
@@ -1152,6 +1355,38 @@ export class DeterministicAgentService {
     return Array.from(new Set([...directMatches, ...byPrefix])).filter((symbol) => {
       return !COMMON_SYMBOL_FALSE_POSITIVES.has(symbol);
     });
+  }
+
+  private parseTargetMaxHoldingPct(message: string): number | undefined {
+    const patterns = [
+      /(?:max(?:imum)?|cap|target)\s*(?:holding|position|weight)?[^\d]{0,16}(\d{1,2}(?:\.\d+)?)\s*%?/i,
+      /(\d{1,2}(?:\.\d+)?)\s*%\s*(?:max|cap|target)/i,
+      /rebalance[^\d]{0,20}(\d{1,2}(?:\.\d+)?)\s*%/i
+    ];
+
+    for (const pattern of patterns) {
+      const match = message.match(pattern);
+      if (!match?.[1]) {
+        continue;
+      }
+
+      const parsed = Number(match[1]);
+      if (!Number.isFinite(parsed)) {
+        continue;
+      }
+
+      return Math.max(5, Math.min(35, roundTwo(parsed)));
+    }
+
+    return undefined;
+  }
+
+  private parseRebalanceExcludedSymbols(message: string): string[] {
+    if (!/(exclude|excluding|without|except|skip)\b/i.test(message)) {
+      return [];
+    }
+
+    return this.extractExplicitHoldingSymbols(message);
   }
 
   private isShortAffirmation(message: string): boolean {

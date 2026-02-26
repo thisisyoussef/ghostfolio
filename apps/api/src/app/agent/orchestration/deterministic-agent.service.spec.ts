@@ -65,6 +65,24 @@ describe('DeterministicAgentService', () => {
     expect(response.toolCalls[0].name).toBe('portfolio_risk_analysis');
   });
 
+  it('should route rebalance preview query to portfolio_rebalance_preview', async () => {
+    const response = await service.chat({
+      message:
+        'Create a rebalance preview with max holding 20% and exclude XOM.',
+      sessionId: TEST_SESSION,
+      userId: TEST_USER
+    });
+
+    expect(response.toolCalls).toHaveLength(1);
+    expect(response.toolCalls[0].name).toBe('portfolio_rebalance_preview');
+    expect(response.response).toContain('Portfolio Rebalance Preview');
+    expect(response.response).toContain('Suggested Trades');
+    expect(response.toolCalls[0].args).toMatchObject({
+      excludeSymbols: ['XOM'],
+      targetMaxHoldingPct: 20
+    });
+  });
+
   it('should route ESG query to compliance_check', async () => {
     const response = await service.chat({
       message: 'Is my portfolio ESG compliant?',
